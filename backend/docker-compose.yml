@@ -1,0 +1,29 @@
+version: "3.3"
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: immo_postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=immo_db
+      - POSTGRES_USER=immo_user
+      - POSTGRES_PASSWORD=immo_password_2024
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - immo_network
+  api:
+    build: .
+    container_name: immo_api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    networks:
+      - immo_network
+volumes:
+  postgres_data:
+networks:
+  immo_network:
+    driver: bridge

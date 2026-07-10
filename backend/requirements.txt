@@ -1,0 +1,22 @@
+# Framework
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+
+# Base de données
+sqlalchemy==2.0.23
+psycopg2-binary==2.9.9
+
+# Validation
+pydantic==2.5.2
+pydantic-settings==2.1.0
+
+# Uploads
+python-multipart==0.0.6
+aiofiles==23.2.1
+Pillow==10.1.0
+
+# Variables d'environnement
+python-dotenv==1.0.0
+
+# Client HTTP
+httpx==0.25.2
