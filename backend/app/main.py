@@ -1,53 +1,58 @@
+# backend/app/main.py
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from datetime import datetime
+from fastapi.staticfiles import StaticFiles
+import logging
+import os
+
+from app.routes.documents import router as documents_router
+from app.routes.properties import router as properties_router
+from app.routes.auth import router as auth_router
+from app.routes.history import router as history_router
+from app.routes.export import router as export_router
+from app.routes.owners import router as owners_router
+from app.routes.accounting import router as accounting_router
+
+
+app_logger = logging.getLogger("app")
+logging.basicConfig(level=logging.INFO)
 
 app = FastAPI(
     title="API Gestion Immobilière",
-    description="API pour gestion de biens immobiliers",
-    version="1.0.0"
+    version="1.0.0",
+    docs_url="/docs",
 )
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Stockage en mémoire
-properties = []
-counter = 1
+app.include_router(properties_router)
+app.include_router(auth_router)
+app.include_router(documents_router)
+app.include_router(history_router)
+app.include_router(export_router)
+app.include_router(owners_router)
+app.include_router(accounting_router)
 
-@app.get("/")
-def root():
-    return {"message": "API Immobilière", "docs": "/docs"}
+
+# ✅ Servir les fichiers uploadés
+os.makedirs("uploads", exist_ok=True)
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 @app.get("/health")
-def health():
-    return {
-        "status": "healthy",
-        "timestamp": datetime.now().isoformat(),
-        "version": "1.0.0"
-    }
+async def health():
+    return {"status": "healthy"}
 
-@app.get("/api/properties/")
-def list_properties():
-    return {"data": properties, "total": len(properties)}
+@app.get("/")
+async def root():
+    return {"message": "API OK", "docs": "/docs"}
 
-@app.post("/api/properties/")
-def create_property(property_data: dict):
-    global counter
-    property_data["id"] = counter
-    property_data["reference"] = f"PROP-{counter:04d}"
-    counter += 1
-    properties.append(property_data)
-    return property_data
-
-@app.get("/api/properties/statistics")
-def statistics():
-    return {
-        "total_properties": len(properties),
-        "by_type": {},
-        "by_status": {}
-    }
+@app.on_event("startup")
+async def startup():
+    app_logger.info("🚀 API démarrée !")
