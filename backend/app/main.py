@@ -13,6 +13,9 @@ from app.routes.history import router as history_router
 from app.routes.export import router as export_router
 from app.routes.owners import router as owners_router
 from app.routes.accounting import router as accounting_router
+from app.routes.notifications import router as notifications_router
+from app.routes.messages import router as messages_router
+
 
 
 app_logger = logging.getLogger("app")
@@ -39,6 +42,9 @@ app.include_router(history_router)
 app.include_router(export_router)
 app.include_router(owners_router)
 app.include_router(accounting_router)
+app.include_router(notifications_router)
+app.include_router(messages_router)
+
 
 
 # ✅ Servir les fichiers uploadés

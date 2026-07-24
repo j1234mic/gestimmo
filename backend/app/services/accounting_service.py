@@ -282,3 +282,55 @@ def generate_statement_pdf(statement: dict):
     doc.build(elements)
     buffer.seek(0)
     return buffer
+
+
+def get_global_overview(db: Session):
+    """Synthèse globale de la comptabilité."""
+    
+    # Total des revenus
+    total_income = db.query(sqlfunc.coalesce(sqlfunc.sum(OwnerTransaction.amount), 0)).filter(
+        OwnerTransaction.amount > 0,
+        OwnerTransaction.status == "completed"
+    ).scalar() or 0
+    
+    # Total des dépenses
+    total_expenses = db.query(sqlfunc.coalesce(sqlfunc.sum(OwnerTransaction.amount), 0)).filter(
+        OwnerTransaction.amount < 0,
+        OwnerTransaction.status == "completed"
+    ).scalar() or 0
+    
+    # Total versé aux propriétaires
+    total_paid = db.query(sqlfunc.coalesce(sqlfunc.sum(OwnerTransaction.amount), 0)).filter(
+        OwnerTransaction.transaction_type == "owner_payment",
+        OwnerTransaction.status == "completed"
+    ).scalar() or 0
+    
+    # Nombre de propriétaires avec un solde positif
+    from app.models.accounting import OwnerBalance
+    positive_balances = db.query(OwnerBalance).filter(
+        OwnerBalance.current_balance > 0
+    ).count()
+    
+    # Top 5 propriétaires par revenus
+    top_owners = db.query(
+        Owner, sqlfunc.sum(OwnerTransaction.amount).label('total')
+    ).join(OwnerTransaction).filter(
+        OwnerTransaction.amount > 0,
+        OwnerTransaction.status == "completed"
+    ).group_by(Owner.id).order_by(sqlfunc.sum(OwnerTransaction.amount).desc()).limit(5).all()
+    
+    return {
+        "total_income": float(total_income),
+        "total_expenses": float(abs(total_expenses)),
+        "total_paid_to_owners": float(abs(total_paid)),
+        "net_in_account": float(total_income - abs(total_expenses) - abs(total_paid)),
+        "positive_balances_count": positive_balances,
+        "top_owners": [
+            {
+                "id": o.id,
+                "name": o.company_name or f"{o.first_name or ''} {o.last_name or ''}".strip(),
+                "total": float(total)
+            }
+            for o, total in top_owners
+        ]
+    }

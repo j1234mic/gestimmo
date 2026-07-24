@@ -14,6 +14,7 @@ from app.services.accounting_service import (
 )
 from app.schemas.accounting import TransactionCreate, TransactionResponse, BalanceResponse
 from fastapi.responses import StreamingResponse
+from app.services.accounting_service import get_statement
 
 router = APIRouter(prefix="/api/accounting", tags=["Accounting"])
 
@@ -92,9 +93,7 @@ def get_owner_statement(
     db: Session = Depends(get_db),
     current_user = Depends(require_read)
 ):
-    """Relevé de gestion (mensuel/trimestriel/annuel) en JSON ou PDF."""
-    from datetime import date
-    from app.services.accounting_service import get_statement
+  
     
     statement = get_statement(db, owner_id, year, period, month, quarter)
     
@@ -105,3 +104,14 @@ def get_owner_statement(
             headers={"Content-Disposition": f"attachment; filename=releve-{owner_id}-{year}-{period}.pdf"})
     
     return statement
+
+    # backend/app/routes/accounting.py - Ajouter
+
+@router.get("/overview")
+def get_accounting_overview(
+    db: Session = Depends(get_db),
+    current_user = Depends(require_read)
+):
+    """Vue d'ensemble du compte de gérance (tous les propriétaires)."""
+    from app.services.accounting_service import get_global_overview
+    return get_global_overview(db)
