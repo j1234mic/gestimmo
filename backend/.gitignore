@@ -1,1 +1,29 @@
+# Variables d'environnement
 .env
+.env.*
+.env.local
+.env.production
+.env.development
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+.Python
+env/
+venv/
+.venv/
+ENV/
+
+# FastAPI / Uvicorn
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
