@@ -11,3 +11,4 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 class RequestSanitizer(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         return await call_next(request)
+    

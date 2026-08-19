@@ -6,6 +6,7 @@ from fastapi.staticfiles import StaticFiles
 import logging
 import os
 
+# Imports des routeurs
 from app.routes.documents import router as documents_router
 from app.routes.properties import router as properties_router
 from app.routes.auth import router as auth_router
@@ -15,26 +16,38 @@ from app.routes.owners import router as owners_router
 from app.routes.accounting import router as accounting_router
 from app.routes.notifications import router as notifications_router
 from app.routes.messages import router as messages_router
+from app.routes import owner_portal, communication
 
+# Import des middlewares personnalisés depuis core/security.py
+from app.core.security import SecurityHeadersMiddleware, RequestSanitizer
 
-
+# Configuration du logging
 app_logger = logging.getLogger("app")
 logging.basicConfig(level=logging.INFO)
 
+# Création de l'application FastAPI
 app = FastAPI(
     title="API Gestion Immobilière",
     version="1.0.0",
     docs_url="/docs",
 )
 
+# 1. Middleware CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  # En production, remplacez par les domaines autorisés
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+# 2. Middleware de sécurité (headers HTTP)
+app.add_middleware(SecurityHeadersMiddleware)
+
+# 3. Middleware de nettoyage des requêtes
+app.add_middleware(RequestSanitizer)
+
+# Inclusion des routeurs
 app.include_router(properties_router)
 app.include_router(auth_router)
 app.include_router(documents_router)
@@ -45,12 +58,15 @@ app.include_router(accounting_router)
 app.include_router(notifications_router)
 app.include_router(messages_router)
 
+# Routeurs du portail propriétaire et de la communication
+app.include_router(owner_portal.router)
+app.include_router(communication.router)
 
-
-# ✅ Servir les fichiers uploadés
+# Servir les fichiers uploadés
 os.makedirs("uploads", exist_ok=True)
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
+# Endpoints de base
 @app.get("/health")
 async def health():
     return {"status": "healthy"}
@@ -59,6 +75,7 @@ async def health():
 async def root():
     return {"message": "API OK", "docs": "/docs"}
 
+# Événement de démarrage
 @app.on_event("startup")
 async def startup():
     app_logger.info("🚀 API démarrée !")
