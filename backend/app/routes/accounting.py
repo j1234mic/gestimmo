@@ -86,10 +86,10 @@ def remove_transaction(
 def get_owner_statement(
     owner_id: int,
     year: int = Query(...),
-    period: str = Query("monthly", regex="^(monthly|quarterly|annual)$"),
+    period: str = Query("monthly", pattern="^(monthly|quarterly|annual)$"),
     month: Optional[int] = Query(None, ge=1, le=12),
     quarter: Optional[int] = Query(None, ge=1, le=4),
-    format: str = Query("json", regex="^(json|pdf)$"),
+    format: str = Query("json", pattern="^(json|pdf)$"),
     db: Session = Depends(get_db),
     current_user = Depends(require_read)
 ):

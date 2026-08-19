@@ -109,12 +109,6 @@ class PropertyResponse(BaseModel):
     class Config:
         from_attributes = True
 
-class PropertyDetailResponse(PropertyResponse):
-    photos: List['PhotoResponse']
-    documents: List['DocumentResponse']
-    evaluations: List['EvaluationResponse']
-    history: List['HistoryResponse']
-
 class PhotoResponse(BaseModel):
     id: int
     url: str
@@ -156,6 +150,12 @@ class HistoryResponse(BaseModel):
     
     class Config:
         from_attributes = True
+
+class PropertyDetailResponse(PropertyResponse):
+    photos: List[PhotoResponse]
+    documents: List[DocumentResponse]
+    evaluations: List[EvaluationResponse]
+    history: List[HistoryResponse]
 
 class PropertyFilter(BaseModel):
     search: Optional[str] = None
