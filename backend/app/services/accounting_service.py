@@ -181,14 +181,18 @@ def get_statement(db: Session, owner_id: int, year: int, period: str, month: int
     """Générer un relevé mensuel/trimestriel/annuel."""
     from datetime import date
     
-    if period == "monthly" and month:
+    if period == "monthly":
+        # Valeur par défaut : janvier si le mois n'est pas précisé
+        month = month or 1
         start = date(year, month, 1)
         if month == 12:
             end = date(year + 1, 1, 1)
         else:
             end = date(year, month + 1, 1)
         period_label = f"{month:02d}/{year}"
-    elif period == "quarterly" and quarter:
+    elif period == "quarterly":
+        # Valeur par défaut : 1er trimestre si non précisé
+        quarter = quarter or 1
         start_month = (quarter - 1) * 3 + 1
         start = date(year, start_month, 1)
         end_month = start_month + 3

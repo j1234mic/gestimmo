@@ -5,14 +5,15 @@ from typing import List, Optional
 from datetime import date, datetime
 
 from app.database import get_db
-from app.models.owner import Owner
+from app.auth import USERS_DB
+from app.models.owner import Owner, Mandate
 from app.models.property import Property
 from app.models.accounting import OwnerTransaction, OwnerBalance
 from app.models.message import Message
 from app.schemas.accounting import TransactionResponse
 from app.schemas.message import MessageResponse, MessageCreate
 from app.schemas.owner import OwnerDetailResponse
-from app.middleware.security import get_current_owner  # À adapter selon votre système d'auth
+from app.core.security import get_current_owner
 
 router = APIRouter(prefix="/owner-portal", tags=["Portail propriétaire"])
 
@@ -139,10 +140,13 @@ def send_message(
     db: Session = Depends(get_db),
     current_owner: Owner = Depends(get_current_owner)
 ):
-    """Envoi d'un message au gestionnaire (admin)"""
-    # On suppose que le gestionnaire a un compte admin avec id=1 ou un rôle particulier
-    # Pour simplifier, on envoie toujours au premier admin (à adapter)
-    admin = db.query(Owner).filter(Owner.owner_type == "admin").first()  # Exemple : ajout d'un type admin fictif
+    """Envoi d'un message au gestionnaire (admin)."""
+    # Destinataire : premier compte admin/manager de l'application (app.auth.USERS_DB)
+    # dont un enregistrement Owner existe en base (correspondance par email).
+    admin_emails = [
+        u.email for u in USERS_DB.values() if u.role in ("admin", "manager")
+    ]
+    admin = db.query(Owner).filter(Owner.email.in_(admin_emails)).first()
     if not admin:
         raise HTTPException(status_code=404, detail="Aucun gestionnaire trouvé")
 
