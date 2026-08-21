@@ -5,6 +5,7 @@
 .env.production
 .env.development
 uploads/
+private_uploads/
 
 # Python
 __pycache__/
