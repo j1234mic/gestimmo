@@ -16,7 +16,14 @@ from app.routes.owners import router as owners_router
 from app.routes.accounting import router as accounting_router
 from app.routes.notifications import router as notifications_router
 from app.routes.messages import router as messages_router
+from app.routes.applications import router as applications_router
+from app.routes.tenants import router as tenants_router
+from app.routes.tenant_portal import router as tenant_portal_router
+from app.routes.leases import router as leases_router, signature_router as lease_signature_router
+from app.routes.inspections import router as inspections_router
 from app.routes import owner_portal, communication
+from app.config import settings
+from app.database import init_db
 
 # Import des middlewares personnalisés depuis core/security.py
 from app.core.security import SecurityHeadersMiddleware, RequestSanitizer
@@ -57,14 +64,23 @@ app.include_router(owners_router)
 app.include_router(accounting_router)
 app.include_router(notifications_router)
 app.include_router(messages_router)
+app.include_router(applications_router)
+app.include_router(tenants_router)
+app.include_router(tenant_portal_router)
+app.include_router(leases_router)
+app.include_router(lease_signature_router)
+app.include_router(inspections_router)
 
 # Routeurs du portail propriétaire et de la communication
 app.include_router(owner_portal.router)
 app.include_router(communication.router)
 
-# Servir les fichiers uploadés
-os.makedirs("uploads", exist_ok=True)
-app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+# Seuls les médias publics historiques sont servis statiquement. Les dossiers
+# locataires sont conservés dans PRIVATE_UPLOAD_DIR et passent par des routes
+# authentifiées de téléchargement.
+os.makedirs(settings.upload_dir_path, exist_ok=True)
+os.makedirs(settings.private_upload_dir_path, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=str(settings.upload_dir_path)), name="uploads")
 
 # Endpoints de base
 @app.get("/health")
@@ -78,4 +94,6 @@ async def root():
 # Événement de démarrage
 @app.on_event("startup")
 async def startup():
+    if settings.AUTO_CREATE_TABLES:
+        init_db()
     app_logger.info("🚀 API démarrée !")
