@@ -15,4 +15,4 @@ def list_notifications(
     current_user = Depends(require_read)
 ):
     """Récupérer toutes les notifications."""
-    return get_notifications(db)
+    return get_notifications(db) 
