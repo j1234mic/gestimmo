@@ -18,12 +18,23 @@ services:
     build: .
     container_name: immo_api
     restart: unless-stopped
+    depends_on:
+      - postgres
+    environment:
+      - DATABASE_URL=postgresql://immo_user:immo_password_2024@postgres:5432/immo_db
+      - AUTO_CREATE_TABLES=true
+      - DEBUG=false
     ports:
       - "8000:8000"
+    volumes:
+      - public_uploads:/app/uploads
+      - private_uploads:/app/private_uploads
     networks:
       - immo_network
 volumes:
   postgres_data:
+  public_uploads:
+  private_uploads:
 networks:
   immo_network:
     driver: bridge
