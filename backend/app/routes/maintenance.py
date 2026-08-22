@@ -576,7 +576,7 @@ def update_equipment_endpoint(equipment_id: int, data: EquipmentUpdate, db: Sess
     try:
         equipment = update_equipment(db, equipment_id, data)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=400, detail=str(exc)) 
     return _equipment_view(equipment)
 
 
