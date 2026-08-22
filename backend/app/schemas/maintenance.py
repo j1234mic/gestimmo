@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 from app.models.maintenance import (
     ExpenseImputation,
     MaintenanceType,
+    PurchaseOrderStatus,
     QuoteStatus,
     TicketCategory,
     TicketSource,
@@ -116,6 +117,18 @@ class EvaluationCreate(BaseModel):
     comment: Optional[str] = None
     would_reuse: bool = True
     evaluated_by: Optional[str] = None
+
+
+class PurchaseOrderCreate(BaseModel):
+    quote_id: Optional[int] = None
+    provider_id: int
+    amount: float
+    description: Optional[str] = None
+    planned_date: Optional[date] = None
+
+
+class PurchaseOrderStatusUpdate(BaseModel):
+    status: PurchaseOrderStatus
 
 
 # ---------------------------------------------------------------------------

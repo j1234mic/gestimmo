@@ -130,6 +130,13 @@ class ExpenseImputation(str, enum.Enum):
     COPROPERTY = "copropriete"
 
 
+class PurchaseOrderStatus(str, enum.Enum):
+    DRAFT = "draft"
+    SENT = "envoye"
+    CONFIRMED = "confirme"
+    CANCELLED = "annule"
+
+
 # ---------------------------------------------------------------------------
 # Prestataires
 # ---------------------------------------------------------------------------
@@ -253,6 +260,29 @@ class ProviderQuote(Base):
 
     ticket = relationship("MaintenanceTicket", back_populates="quotes")
     provider = relationship("ServiceProvider", back_populates="quotes")
+
+
+class PurchaseOrder(Base):
+    """Bon de commande émis auprès d'un prestataire suite à un devis accepté."""
+    __tablename__ = "purchase_orders"
+
+    id = Column(Integer, primary_key=True, index=True)
+    reference = Column(String(30), unique=True, nullable=False, index=True)
+    ticket_id = Column(Integer, ForeignKey("maintenance_tickets.id", ondelete="CASCADE"), nullable=False, index=True)
+    quote_id = Column(Integer, ForeignKey("provider_quotes.id", ondelete="SET NULL"), nullable=True)
+    provider_id = Column(Integer, ForeignKey("service_providers.id", ondelete="CASCADE"), nullable=False, index=True)
+    amount = Column(Float, nullable=False)
+    status = Column(Enum(PurchaseOrderStatus), default=PurchaseOrderStatus.DRAFT, nullable=False)
+    description = Column(Text)
+    planned_date = Column(Date)
+    issued_by = Column(String(255))
+    issued_at = Column(DateTime(timezone=True), server_default=func.now())
+    confirmed_at = Column(DateTime(timezone=True))
+    pdf_storage_path = Column(String(700))
+
+    ticket = relationship("MaintenanceTicket")
+    quote = relationship("ProviderQuote")
+    provider = relationship("ServiceProvider")
 
 
 class ProviderEvaluation(Base):
