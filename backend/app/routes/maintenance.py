@@ -22,6 +22,7 @@ from app.models.maintenance import (
     PreventiveMaintenanceTask,
     ProviderEvaluation,
     ProviderQuote,
+    PurchaseOrder,
     QuoteStatus,
     ServiceProvider,
     TicketCategory,
@@ -42,6 +43,9 @@ from app.schemas.maintenance import (
     PreventivePlanCreate,
     PreventiveTaskUpdate,
     ProviderQuoteCreate,
+    PurchaseOrderCreate,
+    PurchaseOrderStatusUpdate,
+    QualityControl,
     QuoteStatusUpdate,
     ServiceProviderCreate,
     ServiceProviderUpdate,
@@ -60,6 +64,7 @@ from app.services.maintenance_service import (
     add_provider_quote,
     add_work_document,
     add_work_phase,
+    apply_quality_control,
     attach_file,
     change_status,
     compare_quotes,
@@ -68,6 +73,7 @@ from app.services.maintenance_service import (
     create_maintenance_expense,
     create_preventive_plan,
     create_provider,
+    create_purchase_order,
     create_ticket,
     create_work_project,
     escalate_overdue_tickets,
@@ -80,7 +86,9 @@ from app.services.maintenance_service import (
     receive_work_project,
     update_equipment,
     update_provider,
+    update_purchase_order_status,
     update_work_project,
+    work_project_gantt,
 )
 
 router = APIRouter(prefix="/api/maintenance", tags=["Maintenance et travaux"])
@@ -267,6 +275,42 @@ def compare_ticket_quotes(ticket_id: int, db: Session = Depends(get_db), current
         raise HTTPException(status_code=400, detail=str(exc))
 
 
+@router.post("/tickets/{ticket_id}/purchase-orders", status_code=201)
+def create_purchase_order_endpoint(ticket_id: int, data: PurchaseOrderCreate, db: Session = Depends(get_db), current_user=Depends(require_write)):
+    _ticket_or_404(db, ticket_id)
+    try:
+        order = create_purchase_order(db, ticket_id, data)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return _purchase_order_view(order)
+
+
+@router.get("/tickets/{ticket_id}/purchase-orders")
+def list_purchase_orders(ticket_id: int, db: Session = Depends(get_db), current_user=Depends(require_read)):
+    _ticket_or_404(db, ticket_id)
+    orders = db.query(PurchaseOrder).filter(PurchaseOrder.ticket_id == ticket_id).order_by(PurchaseOrder.issued_at.desc()).all()
+    return {"data": [_purchase_order_view(o) for o in orders], "count": len(orders)}
+
+
+@router.put("/purchase-orders/{order_id}/status")
+def update_purchase_order_status_endpoint(order_id: int, data: PurchaseOrderStatusUpdate, db: Session = Depends(get_db), current_user=Depends(require_write)):
+    try:
+        order = update_purchase_order_status(db, order_id, data.status)
+    except ValueError as exc:
+        raise HTTPException(status_code=404 if "trouvé" in str(exc) else 400, detail=str(exc))
+    return _purchase_order_view(order)
+
+
+@router.post("/tickets/{ticket_id}/quality-control")
+def quality_control_endpoint(ticket_id: int, data: QualityControl, db: Session = Depends(get_db), current_user=Depends(require_write)):
+    _ticket_or_404(db, ticket_id)
+    try:
+        ticket = apply_quality_control(db, ticket_id, data)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return _ticket_view(ticket)
+
+
 @router.post("/tickets/{ticket_id}/evaluations", status_code=201)
 def evaluate_provider(ticket_id: int, data: EvaluationCreate, db: Session = Depends(get_db), current_user=Depends(require_write)):
     _ticket_or_404(db, ticket_id)
@@ -411,6 +455,14 @@ def get_work_project(project_id: int, db: Session = Depends(get_db), current_use
         for d in project.documents
     ]
     return view
+
+
+@router.get("/projects/{project_id}/gantt")
+def get_work_project_gantt(project_id: int, db: Session = Depends(get_db), current_user=Depends(require_read)):
+    try:
+        return work_project_gantt(db, project_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
 
 
 @router.put("/projects/{project_id}")
@@ -640,6 +692,23 @@ def _quote_view(q: ProviderQuote) -> dict:
         "description": q.description,
         "valid_until": q.valid_until,
         "status": q.status.value,
+    }
+
+
+def _purchase_order_view(o: PurchaseOrder) -> dict:
+    return {
+        "id": o.id,
+        "reference": o.reference,
+        "ticket_id": o.ticket_id,
+        "quote_id": o.quote_id,
+        "provider_id": o.provider_id,
+        "provider_name": o.provider.company_name if o.provider else "",
+        "amount": o.amount,
+        "status": o.status.value,
+        "description": o.description,
+        "planned_date": o.planned_date,
+        "issued_at": o.issued_at,
+        "confirmed_at": o.confirmed_at,
     }
 
 

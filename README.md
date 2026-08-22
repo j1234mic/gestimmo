@@ -55,7 +55,22 @@ Le module maintenance ajoute :
 - **maintenance préventive** : planification récurrente (ramonage, chaudière, détecteurs de fumée, espaces verts, nettoyage, personnalisable), calendrier, alertes automatiques et matérialisation des tâches ;
 - **travaux lourds** : projet, budget prévisionnel, suivi d'avancement, planning de phases (Gantt), documents (permis, devis, factures), réception des travaux ;
 - **suivi financier** : budget maintenance par bien, coûts réels vs prévisionnel, imputation propriétaire / locataire / copropriété et reporting ;
-- **inventaire des équipements** : liste par bien, date d'installation, garantie, contrat d'entretien, historique des pannes et date de remplacement prévisionnelle.
+- **inventaire des équipements** : liste par bien, date d'installation, garantie, contrat d'entretien, historique des pannes et date de remplacement prévisionnelle ;
+- **bon de commande** : émission auprès du prestataire à partir d'un devis, suivi de statut (brouillon, envoyé, confirmé, annulé) et rattachement automatique au ticket ;
+- **contrôle qualité** : validation ou refus post-intervention avant clôture, avec retour en cours si non conforme ;
+- **planning de phases (Gantt)** : vue consolidée des dates et de l'avancement de chaque phase d'un projet de travaux.
+
+## Module 7 — Gestion de copropriété
+
+Le module copropriété ajoute :
+
+- **fiche copropriété / immeuble** : informations générales, règlement de copropriété, liste des lots (numéro, type, tantièmes, propriétaire, occupant), parties communes et coordonnées du syndic ;
+- **contrôle des tantièmes** : vérification de la répartition totale des lots par rapport au total déclaré de la copropriété ;
+- **charges de copropriété** : budget prévisionnel par poste (courant / exceptionnel / travaux), vote en assemblée, appels de fonds répartis automatiquement par tantièmes (avec ajustement d'arrondi), suivi des paiements par lot, fonds de travaux (loi ALUR) avec cotisations/prélèvements, et répartition annuelle des charges par lot ;
+- **assemblée générale** : convocation (verrouille l'ordre du jour et prépare la feuille de présence), feuille de présence avec calcul du quorum, résolutions avec majorités légales (article 24/25/26, unanimité), vote par lot au tantième, procès-verbal structuré et clôture ;
+- **conseil syndical** : membres (président, membres, suppléants), réunions et comptes-rendus ;
+- **carnet d'entretien** : historique des travaux, contrats en cours, diagnostics et sinistres ;
+- **comptabilité copropriété** : plan comptable dédié (créable en un clic avec la nomenclature standard), écritures équilibrées, grand livre par compte et bilan simplifié (actif / passif / résultat / solde du fonds travaux).
 
 ## Démarrage avec Docker
 
@@ -167,7 +182,31 @@ Sans `STRIPE_SECRET_KEY`, l'endpoint de paiement répond `503` au lieu de simule
 - `GET /calendar?start_date=&end_date=` — calendrier de maintenance ;
 - `POST /projects`, `GET /projects`, `GET|PUT /projects/{id}`, `POST /projects/{id}/phases`, `POST /projects/{id}/documents`, `POST /projects/{id}/receive` — travaux lourds ;
 - `POST /equipment`, `GET /equipment`, `GET|PUT /equipment/{id}`, `POST /equipment/{id}/logs`, `GET /equipment/{id}/history` — inventaire ;
-- `POST /expenses`, `GET /expenses`, `GET /budget?property_id=&year=`, `GET /reporting?year=` — suivi financier.
+- `POST /expenses`, `GET /expenses`, `GET /budget?property_id=&year=`, `GET /reporting?year=` — suivi financier ;
+- `POST /tickets/{id}/purchase-orders`, `GET /tickets/{id}/purchase-orders`, `PUT /purchase-orders/{id}/status` — bon de commande ;
+- `POST /tickets/{id}/quality-control` — contrôle qualité post-intervention ;
+- `GET /projects/{id}/gantt` — planning Gantt du projet de travaux.
+
+### Gestion de copropriété (`/api/condo`)
+
+- `POST /buildings`, `GET /buildings`, `GET|PUT /buildings/{id}` — fiche copropriété / immeuble ;
+- `POST /buildings/{id}/lots`, `GET /buildings/{id}/lots`, `PUT /lots/{id}` — lots (numéro, type, tantièmes, propriétaire, occupant) ;
+- `GET /buildings/{id}/tantiemes-balance` — contrôle de la répartition des tantièmes ;
+- `POST /buildings/{id}/common-areas` — parties communes ;
+- `POST /buildings/{id}/budgets`, `GET /buildings/{id}/budgets`, `POST /budgets/{id}/vote` — budget prévisionnel et vote ;
+- `POST /buildings/{id}/fund-calls`, `GET /buildings/{id}/fund-calls`, `GET /fund-calls/{id}`, `POST /fund-calls/{id}/send`, `POST /fund-calls/lines/{id}/pay` — appels de fonds répartis par tantièmes et suivi des règlements ;
+- `GET /buildings/{id}/charges-repartition?fiscal_year=` — répartition annuelle des charges par lot ;
+- `GET|PUT /buildings/{id}/works-fund`, `POST /buildings/{id}/works-fund/movements` — fonds de travaux (loi ALUR) ;
+- `POST /buildings/{id}/assemblies`, `GET /buildings/{id}/assemblies`, `GET /assemblies/{id}` — assemblées générales ;
+- `POST /assemblies/{id}/convene`, `POST /assemblies/{id}/attendance` — convocation et feuille de présence (quorum) ;
+- `POST /assemblies/{id}/resolutions`, `POST /resolutions/{id}/vote` — résolutions et votes par tantième (majorités article 24/25/26, unanimité) ;
+- `POST /assemblies/{id}/close`, `GET /assemblies/{id}/minutes` — clôture et procès-verbal structuré ;
+- `POST /buildings/{id}/council-members`, `GET /buildings/{id}/council-members`, `PUT /council-members/{id}` — conseil syndical ;
+- `POST /buildings/{id}/council-meetings`, `GET /buildings/{id}/council-meetings`, `PUT /council-meetings/{id}/minutes` — réunions et comptes-rendus ;
+- `POST /buildings/{id}/book-entries`, `GET /buildings/{id}/book-entries` — carnet d'entretien (travaux, contrats, diagnostics, sinistres) ;
+- `POST /accounts/standard`, `POST /accounts`, `GET /accounts` — plan comptable copropriété ;
+- `POST /buildings/{id}/journal-entries`, `GET /buildings/{id}/journal-entries`, `POST /journal-entries/{id}/validate` — écritures comptables équilibrées ;
+- `GET /buildings/{id}/general-ledger?account_code=`, `GET /buildings/{id}/balance-sheet?as_of=` — grand livre et bilan simplifié.
 
 ## Scoring
 
@@ -191,3 +230,5 @@ python -m unittest discover -s tests -v
 ```
 
 Les tests utilisent SQLite et couvrent le dépôt d'une candidature, l'OCR, le scoring, la validation, l'activation du portail, les alertes de retard, les quittances, les modèles de bail, les révisions plafonnées, la signature avec dossier de preuve, la comparaison des états des lieux, ainsi que les modules 5 et 6 : appels de loyer, encaissement, impayés et plans d'apurement, charges et régularisation, écritures et balance, facturation, dépôt de garantie, exports, workflow de tickets avec SLA/escalade, devis, maintenance préventive, travaux et équipements.
+
+Le module 7 (copropriété) et les compléments du module 6 (bon de commande, contrôle qualité, planning Gantt) sont couverts par `tests/test_condo_module.py` : lots et tantièmes, budget et vote, appels de fonds répartis automatiquement, paiements, fonds travaux, assemblée générale complète (convocation, présence, résolutions/votes, PV, clôture), conseil syndical, carnet d'entretien et comptabilité dédiée (plan comptable, écritures, grand livre, bilan).

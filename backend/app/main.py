@@ -23,6 +23,7 @@ from app.routes.leases import router as leases_router, signature_router as lease
 from app.routes.inspections import router as inspections_router
 from app.routes.finance import router as finance_router
 from app.routes.maintenance import router as maintenance_router
+from app.routes.condo import router as condo_router
 from app.routes import owner_portal, communication
 from app.config import settings
 from app.database import init_db
@@ -74,6 +75,7 @@ app.include_router(lease_signature_router)
 app.include_router(inspections_router)
 app.include_router(finance_router)
 app.include_router(maintenance_router)
+app.include_router(condo_router)
 
 # Routeurs du portail propriétaire et de la communication
 app.include_router(owner_portal.router)

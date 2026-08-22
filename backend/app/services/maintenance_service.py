@@ -20,6 +20,8 @@ from app.models.maintenance import (
     PreventiveMaintenanceTask,
     ProviderEvaluation,
     ProviderQuote,
+    PurchaseOrder,
+    PurchaseOrderStatus,
     QuoteStatus,
     ServiceProvider,
     TicketAttachment,
@@ -104,10 +106,28 @@ def escalate_overdue_tickets(db: Session) -> Dict:
     count = 0
     for ticket in overdue:
         ticket.escalated = True
-        _record_status(db, ticket, ticket.status, note="Escalade automatique : SLA dépassé", changed_by="system")
+        _record_status(db, ticket, ticket.status, note="Escalade automatique : SLA dépassé", changed_by="system", notify=False)
+        _escalation_notification(db, ticket)
         count += 1
     db.commit()
     return {"escalated": count}
+
+
+def _escalation_notification(db: Session, ticket: MaintenanceTicket) -> None:
+    """Alerte spécifique d'escalade envoyée au gestionnaire/propriétaire."""
+    message = f"SLA dépassé pour le ticket {ticket.reference} ({ticket.title}) — urgence {ticket.urgency.value}"
+    if ticket.owner_id:
+        from app.models.notification import Notification
+        db.add(Notification(owner_id=ticket.owner_id, type="warning", title="Escalade SLA maintenance", content=message))
+    if ticket.tenant_id:
+        from app.models.tenant import TenantNotification
+        db.add(TenantNotification(
+            tenant_id=ticket.tenant_id,
+            channel="in_app",
+            notification_type="maintenance",
+            title=f"Ticket {ticket.reference} en escalade",
+            content="Votre demande dépasse le délai prévu, elle a été escaladée en priorité.",
+        ))
 
 
 # ---------------------------------------------------------------------------
@@ -159,7 +179,48 @@ def _notify_tenant(db: Session, ticket: MaintenanceTicket, actor: str) -> None:
     ))
 
 
-def _record_status(db, ticket, to_status: TicketStatus, note=None, changed_by=None) -> None:
+# Libellés utilisés pour les notifications automatiques à chaque étape du
+# workflow d'intervention (locataire, propriétaire et in-app gestionnaire).
+STATUS_NOTIFICATION_LABELS = {
+    TicketStatus.NEW: "Votre demande a été enregistrée",
+    TicketStatus.AWAITING_OWNER: "Votre demande est en attente de validation du propriétaire",
+    TicketStatus.VALIDATED: "Votre demande a été validée",
+    TicketStatus.PROVIDER_ASSIGNED: "Un prestataire a été assigné à votre demande",
+    TicketStatus.QUOTE_PENDING: "Un devis est en attente pour votre demande",
+    TicketStatus.QUOTE_VALIDATED: "Le devis de votre demande a été validé",
+    TicketStatus.PLANNED: "Une intervention a été planifiée",
+    TicketStatus.IN_PROGRESS: "L'intervention est en cours",
+    TicketStatus.COMPLETED: "L'intervention est terminée",
+    TicketStatus.QUALITY_CONTROL: "L'intervention est en cours de contrôle qualité",
+    TicketStatus.CLOSED: "Votre demande a été clôturée",
+    TicketStatus.CANCELLED: "Votre demande a été annulée",
+}
+
+
+def _notify_status_change(db: Session, ticket: MaintenanceTicket, to_status: TicketStatus) -> None:
+    """Notifie automatiquement locataire/propriétaire à chaque étape du workflow."""
+    label = STATUS_NOTIFICATION_LABELS.get(to_status, f"Statut mis à jour : {to_status.value}")
+    if ticket.tenant_id:
+        from app.models.tenant import TenantNotification
+        db.add(TenantNotification(
+            tenant_id=ticket.tenant_id,
+            channel="in_app",
+            notification_type="maintenance",
+            title=f"Ticket {ticket.reference}",
+            content=f"{label} ({ticket.title})",
+        ))
+    if ticket.owner_id:
+        from app.models.notification import Notification
+        db.add(Notification(
+            owner_id=ticket.owner_id,
+            type="info",
+            title=f"Ticket {ticket.reference}",
+            content=f"{label} ({ticket.title})",
+        ))
+
+
+def _record_status(db, ticket, to_status: TicketStatus, note=None, changed_by=None, notify: bool = True) -> None:
+    is_transition = ticket.status != to_status
     db.add(TicketStatusHistory(
         ticket_id=ticket.id,
         from_status=ticket.status if ticket.status else None,
@@ -172,6 +233,8 @@ def _record_status(db, ticket, to_status: TicketStatus, note=None, changed_by=No
         ticket.resolved_at = _now()
     elif to_status == TicketStatus.CLOSED:
         ticket.closed_at = _now()
+    if notify and is_transition:
+        _notify_status_change(db, ticket, to_status)
 
 
 def change_status(db: Session, ticket_id: int, to_status: TicketStatus, note=None, changed_by=None) -> MaintenanceTicket:
@@ -197,7 +260,7 @@ _VALID_TRANSITIONS = {
     TicketStatus.PLANNED: {TicketStatus.PLANNED, TicketStatus.IN_PROGRESS, TicketStatus.CANCELLED},
     TicketStatus.IN_PROGRESS: {TicketStatus.IN_PROGRESS, TicketStatus.COMPLETED, TicketStatus.CANCELLED},
     TicketStatus.COMPLETED: {TicketStatus.COMPLETED, TicketStatus.QUALITY_CONTROL, TicketStatus.CLOSED},
-    TicketStatus.QUALITY_CONTROL: {TicketStatus.QUALITY_CONTROL, TicketStatus.CLOSED},
+    TicketStatus.QUALITY_CONTROL: {TicketStatus.QUALITY_CONTROL, TicketStatus.CLOSED, TicketStatus.IN_PROGRESS},
     TicketStatus.CLOSED: {TicketStatus.CLOSED},
     TicketStatus.CANCELLED: {TicketStatus.CANCELLED},
 }
@@ -301,6 +364,49 @@ def compare_quotes(db: Session, ticket_id: int) -> Dict:
         "cheapest_amount": cheapest.amount if cheapest else None,
         "best_value_quote_id": cheapest.id if cheapest else None,
     }
+
+
+def create_purchase_order(db: Session, ticket_id: int, data) -> PurchaseOrder:
+    """Émet un bon de commande auprès d'un prestataire pour un ticket."""
+    ticket = db.query(MaintenanceTicket).filter(MaintenanceTicket.id == ticket_id).first()
+    if not ticket:
+        raise ValueError("Ticket non trouvé")
+    provider = db.query(ServiceProvider).filter(ServiceProvider.id == data.provider_id).first()
+    if not provider:
+        raise ValueError("Prestataire non trouvé")
+    if data.quote_id:
+        quote = db.query(ProviderQuote).filter(ProviderQuote.id == data.quote_id, ProviderQuote.ticket_id == ticket_id).first()
+        if not quote:
+            raise ValueError("Devis non trouvé pour ce ticket")
+    order = PurchaseOrder(
+        reference=generate_reference("BDC"),
+        ticket_id=ticket.id,
+        quote_id=data.quote_id,
+        provider_id=data.provider_id,
+        amount=data.amount,
+        description=data.description,
+        planned_date=data.planned_date,
+        status=PurchaseOrderStatus.DRAFT,
+    )
+    db.add(order)
+    ticket.provider_id = data.provider_id
+    if ticket.status in (TicketStatus.VALIDATED, TicketStatus.QUOTE_VALIDATED):
+        _record_status(db, ticket, TicketStatus.PROVIDER_ASSIGNED, note=f"Bon de commande {order.reference} émis", changed_by=None)
+    db.commit()
+    db.refresh(order)
+    return order
+
+
+def update_purchase_order_status(db: Session, order_id: int, status: PurchaseOrderStatus) -> PurchaseOrder:
+    order = db.query(PurchaseOrder).filter(PurchaseOrder.id == order_id).first()
+    if not order:
+        raise ValueError("Bon de commande non trouvé")
+    order.status = status
+    if status == PurchaseOrderStatus.CONFIRMED:
+        order.confirmed_at = _now()
+    db.commit()
+    db.refresh(order)
+    return order
 
 
 def add_provider_evaluation(db: Session, ticket_id: int, data) -> ProviderEvaluation:
@@ -514,6 +620,53 @@ def receive_work_project(db: Session, project_id: int, comment: str = None) -> W
     db.commit()
     db.refresh(project)
     return project
+
+
+def work_project_gantt(db: Session, project_id: int) -> Dict:
+    """Planning Gantt du projet : phases ordonnées avec dates et avancement."""
+    project = db.query(WorkProject).filter(WorkProject.id == project_id).first()
+    if not project:
+        raise ValueError("Projet non trouvé")
+    phases = sorted(project.phases, key=lambda p: (p.display_order, p.start_date or project.start_date or date.min))
+    items = []
+    for phase in phases:
+        items.append({
+            "id": phase.id,
+            "name": phase.name,
+            "start_date": phase.start_date,
+            "end_date": phase.end_date,
+            "progress": phase.progress,
+            "display_order": phase.display_order,
+            "duration_days": (phase.end_date - phase.start_date).days if phase.start_date and phase.end_date else None,
+        })
+    return {
+        "project_id": project.id,
+        "reference": project.reference,
+        "title": project.title,
+        "start_date": project.start_date,
+        "end_date": project.end_date,
+        "overall_progress": project.progress,
+        "phases": items,
+    }
+
+
+def apply_quality_control(db: Session, ticket_id: int, data) -> MaintenanceTicket:
+    """Contrôle qualité post-intervention avant clôture du ticket."""
+    ticket = db.query(MaintenanceTicket).filter(MaintenanceTicket.id == ticket_id).first()
+    if not ticket:
+        raise ValueError("Ticket non trouvé")
+    if ticket.status not in (TicketStatus.COMPLETED, TicketStatus.QUALITY_CONTROL):
+        raise ValueError("Le contrôle qualité nécessite une intervention terminée")
+    note = f"Contrôle qualité {'validé' if data.passed else 'refusé'}"
+    if data.comment:
+        note += f" : {data.comment}"
+    if data.passed:
+        _record_status(db, ticket, TicketStatus.CLOSED, note=note, changed_by=data.controlled_by)
+    else:
+        _record_status(db, ticket, TicketStatus.IN_PROGRESS, note=note, changed_by=data.controlled_by)
+    db.commit()
+    db.refresh(ticket)
+    return ticket
 
 
 # ---------------------------------------------------------------------------
