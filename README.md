@@ -72,6 +72,31 @@ Le module copropriété ajoute :
 - **carnet d'entretien** : historique des travaux, contrats en cours, diagnostics et sinistres ;
 - **comptabilité copropriété** : plan comptable dédié (créable en un clic avec la nomenclature standard), écritures équilibrées, grand livre par compte et bilan simplifié (actif / passif / résultat / solde du fonds travaux).
 
+## Module 8 — CRM et gestion commerciale
+
+Le module CRM et gestion commerciale ajoute :
+
+- **gestion des prospects** : fiche acheteur / locataire complète (coordonnées, source d'acquisition : site web, portail, agence, parrainage…, critères de recherche structurés en JSON, budget min/max) avec un score de qualité 0-100 explicable (complétude de la fiche, qualité de la source, engagement, actualité du contact) recalculé à chaque évolution ;
+- **pipeline commercial** : huit étapes par défaut (premier contact → qualification → visite programmée → visite effectuée → dossier déposé → dossier validé → bail signé / vente conclue → perdu), configurables (nom, ordre, probabilité, couleur), vue Kanban avec valeurs totales et pondérées par probabilité de conversion, historique des changements d'étape et conversion automatique du prospect en cas de signature ;
+- **gestion des visites** : créneaux de disponibilité par bien, planification avec réservation de créneau, détection des conflits, confirmation automatique, rappels email + SMS journalisés, compte-rendu structuré (note, niveau d'intérêt, forces/faiblesses, prochaine étape), retour du visiteur et vues agenda jour / semaine / mois ;
+- **matching automatique** : scoring explicable prospect ↔ bien (type, localisation, budget avec tolérance 10 %, surface, pièces), alertes à seuil configurable, suggestions de biens classées, notification automatique à l'agent référent et envoi de la suggestion au prospect ;
+- **diffusion multi-portails** : annonces générées à partir de modèles (variables `{titre}`, `{ville}`, `{surface}`…) et publiées sur SeLoger, LeBonCoin, Logic-Immo, Bien'ici, PAP et le site de l'agence, gestion centralisée avec statut de synchronisation par portail, statistiques par annonce et par portail (vues, contacts, favoris, taux de conversion) et retrait total ou partiel ;
+- **transactions de vente** : offre d'achat (acceptation avec création automatique du dossier), compromis de vente, conditions suspensives typées (financement, diagnostic, préemption…) avec deadline et décision (satisfaite / levée / échouée — l'échec annule le dossier), suivi notaire via journal d'événements, acte authentique verrouillé tant qu'une condition est en attente et commission agence calculée HT/TTC (taux + fixe + TVA) ;
+- **suivi de la performance** : KPIs par agent (dossiers créés/gagnés/perdus, taux de conversion, valeur et commissions, visites effectuées, ratio visites par signature, délai moyen de conclusion) et indicateurs globaux (délai moyen de location, taux d'occupation, commissions encaissées).
+
+Aucun envoi réel vers les portails ni les canaux email/SMS n'est simulé : chaque publication et chaque rappel sont journalisés avec leur destinataire, prêts à être branchés sur un prestataire.
+
+## Module 9 — Tableau de bord et reporting
+
+Le module tableau de bord et reporting ajoute :
+
+- **dashboard principal** : KPIs temps réel (biens gérés, taux d'occupation global, revenus mensuels/annuels, impayés en cours, tickets maintenance ouverts, baux et mandats arrivant à échéance à 30/60/90 jours, prospects actifs) et graphiques dynamiques (évolution des revenus sur 12 mois, répartition par type de bien, taux d'occupation mensuel, répartition des charges, performance commerciale) ;
+- **widgets personnalisables** : catalogue de widgets (cartes KPI, graphiques, listes), positionnement persistant en colonnes/ordre pour supporter le drag & drop, réorganisation en masse et données temps réel par type de widget ;
+- **rapports prédéfinis** : rapport de gestion locative, état des loyers, synthèse des impayés, état des travaux, rapport de vacance locative (avec perte de loyer estimée), bilan financier par propriétaire, bilan financier par bien, rapport d'activité de l'agence et rapport fiscal annuel ;
+- **rapports personnalisés** : générateur sur dix datasets (biens, baux, loyers, impayés, tickets, charges, prospects, dossiers, visites, annonces) avec sélection de champs, filtres avancés (eq, ne, gt, gte, lt, lte, like, in, between — valeurs coercées vers les enums et dates), groupements avec agrégats (count/sum/avg/min/max), tri et limite ; planification d'envoi (quotidien, hebdomadaire, mensuel, trimestriel) avec exécution des échéances, partage par jeton sans authentification et historique des exécutions ;
+- **exports** : PDF, Excel, CSV, Word pour tous les rapports prédéfinis et personnalisés, et export API JSON par dataset pour un BI externe ;
+- **alertes dashboard** : règles paramétrables (11 métriques surveillées, comparateur, seuil, sévérité, canaux dashboard/email/SMS, délai de repos anti-spam), évaluation à la demande, journal des déclenchements et prise de connaissance.
+
 ## Démarrage avec Docker
 
 ```bash
@@ -208,6 +233,30 @@ Sans `STRIPE_SECRET_KEY`, l'endpoint de paiement répond `503` au lieu de simule
 - `POST /buildings/{id}/journal-entries`, `GET /buildings/{id}/journal-entries`, `POST /journal-entries/{id}/validate` — écritures comptables équilibrées ;
 - `GET /buildings/{id}/general-ledger?account_code=`, `GET /buildings/{id}/balance-sheet?as_of=` — grand livre et bilan simplifié.
 
+### CRM et gestion commerciale (`/api/crm`)
+
+- `POST /prospects`, `GET /prospects` (filtres type/source/statut/agent/score/recherche), `GET|PUT /prospects/{id}`, `PUT /prospects/{id}/status`, `POST /prospects/{id}/score` — fiche prospect, critères, budget et score de qualité explicable ;
+- `GET /pipeline/stages` (8 étapes par défaut), `POST /pipeline/stages`, `PUT /pipeline/stages/{id}` — étapes configurables ; `GET /pipeline/kanban?agent=` — vue Kanban avec valeurs pondérées ;
+- `POST /deals`, `GET /deals`, `GET|PUT /deals/{id}`, `POST /deals/{id}/stage` — dossiers, probabilité de conversion, valeur estimée et historique d'étapes ;
+- `POST /properties/{id}/availabilities`, `GET /properties/{id}/availabilities?only_free=` — créneaux de disponibilité du bien ;
+- `POST /visits`, `GET /visits`, `GET|PUT /visits/{id}`, `POST /visits/{id}/confirm|cancel|complete|reminders|report|feedback` — planification, confirmation, rappels email+SMS, compte-rendu et retour du visiteur ;
+- `GET /visits/agenda?view=jour|semaine|mois&date=` — vues agenda ;
+- `POST /matching/scan` (seuil et notification automatique), `GET /matching/matches`, `GET /matching/suggestions/{prospect_id}`, `POST /matching/matches/{id}/notify|dismiss` — matching automatique prospect ↔ bien ;
+- `POST /listing-templates`, `GET /listing-templates`, `POST /listings`, `GET|PUT /listings/{id}`, `POST /listings/{id}/publish|unpublish`, `GET /listings/{id}/sync|stats`, `POST /listings/{id}/stats`, `GET /listings`, `GET /portals` — modèles d'annonces et diffusion multi-portails centralisée avec statistiques (vues, contacts, conversion) ;
+- `POST /offers`, `POST /offers/{id}/accept|refuse|withdraw`, `POST /transactions`, `POST /transactions/{id}/compromis`, `POST /transactions/{id}/conditions`, `POST /transactions/conditions/{id}/decision`, `PUT /transactions/{id}/notary`, `POST /transactions/{id}/acte`, `POST /transactions/{id}/events` — offre d'achat, compromis, conditions suspensives, suivi notaire, acte authentique et commission agence ;
+- `GET /notifications`, `PUT /notifications/{id}/read` — notifications commerciales temps réel ;
+- `GET /performance?date_from=&date_to=` — KPIs par agent (visites/signature, délai moyen, taux d'occupation, chiffre d'affaires).
+
+### Tableau de bord et reporting (`/api/reporting`)
+
+- `GET /dashboard`, `GET /dashboard/kpis`, `GET /dashboard/charts?months=` — KPIs temps réel et graphiques dynamiques ;
+- `GET /dashboard/widgets/catalog`, `GET|POST /dashboard/widgets`, `PUT /dashboard/widgets/reorder`, `PUT|DELETE /dashboard/widgets/{id}`, `GET /dashboard/widgets/{type}/data` — widgets personnalisables (drag & drop) et données associées ;
+- `GET /reports/predefined` — liste des 9 rapports ; `GET /reports/predefined/{clé}?year=&month=&format=json|pdf|excel|csv|word` — exécution et export ;
+- `GET /custom-reports/datasets` — catalogue des datasets ; `POST|GET /custom-reports`, `GET|PUT|DELETE /custom-reports/{id}`, `POST /custom-reports/{id}/run` — générateur de rapports avec filtres avancés et groupements ;
+- `POST /custom-reports/{id}/schedule`, `POST /reports/schedules/run` — planification d'envoi automatique ; `GET /reports/shared/{token}` — partage sans authentification ; `GET /executions` — historique ;
+- `GET /exports?dataset=&format=` — exports API pour BI externe (json, pdf, excel, csv, word) ;
+- `POST|GET /alert-rules`, `PUT|DELETE /alert-rules/{id}`, `POST /alerts/evaluate`, `GET /alert-events`, `POST /alert-events/{id}/ack` — alertes paramétrables à seuils personnalisables et notifications temps réel.
+
 ## Scoring
 
 Le score de candidature (0–100) est explicable et versionné. Il porte uniquement sur :
@@ -232,3 +281,7 @@ python -m unittest discover -s tests -v
 Les tests utilisent SQLite et couvrent le dépôt d'une candidature, l'OCR, le scoring, la validation, l'activation du portail, les alertes de retard, les quittances, les modèles de bail, les révisions plafonnées, la signature avec dossier de preuve, la comparaison des états des lieux, ainsi que les modules 5 et 6 : appels de loyer, encaissement, impayés et plans d'apurement, charges et régularisation, écritures et balance, facturation, dépôt de garantie, exports, workflow de tickets avec SLA/escalade, devis, maintenance préventive, travaux et équipements.
 
 Le module 7 (copropriété) et les compléments du module 6 (bon de commande, contrôle qualité, planning Gantt) sont couverts par `tests/test_condo_module.py` : lots et tantièmes, budget et vote, appels de fonds répartis automatiquement, paiements, fonds travaux, assemblée générale complète (convocation, présence, résolutions/votes, PV, clôture), conseil syndical, carnet d'entretien et comptabilité dédiée (plan comptable, écritures, grand livre, bilan).
+
+Le module 8 (CRM et gestion commerciale) est couvert par `tests/test_crm_module.py` : score de qualité explicable du prospect, cycle de vie d'un dossier dans le pipeline jusqu'au Kanban, workflow complet des visites (disponibilités réservées/libérées, confirmation, rappels, compte-rendu, retour visiteur, agenda jour/semaine/mois), matching automatique avec détail du score, publication multi-portails avec statistiques et taux de conversion, transaction de vente de l'offre d'achat à l'acte authentique (conditions suspensives bloquantes, commission HT/TTC) et performance des agents.
+
+Le module 9 (tableau de bord et reporting) est couvert par `tests/test_reporting_module.py` : KPIs temps réel et graphiques, widgets avec réorganisation drag & drop, les neuf rapports prédéfinis, les quatre formats d'export (PDF vérifié avec pypdf, Excel, CSV, Word), générateur de rapports personnalisés (filtres coercés vers les enums/dates, groupements avec agrégats), partage par jeton, planification d'exécution et alertes à seuils avec anti-spam et prise de connaissance.
