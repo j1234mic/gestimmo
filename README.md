@@ -97,6 +97,28 @@ Le module tableau de bord et reporting ajoute :
 - **exports** : PDF, Excel, CSV, Word pour tous les rapports prédéfinis et personnalisés, et export API JSON par dataset pour un BI externe ;
 - **alertes dashboard** : règles paramétrables (11 métriques surveillées, comparateur, seuil, sévérité, canaux dashboard/email/SMS, délai de repos anti-spam), évaluation à la demande, journal des déclenchements et prise de connaissance.
 
+## Module 10 — Communication et notifications
+
+Le module communication ajoute :
+
+- **messagerie interne** : conversations par bien, par dossier commercial, par locataire / propriétaire / bail, fil de discussion, pièces jointes privées, recherche plein texte et archivage (une conversation archivée n'accepte plus de messages) ;
+- **notifications multicanal** : email (modèles personnalisables, variables dynamiques `{{prenom}}`, `{{bien}}`…, pixel de suivi d'ouverture), SMS (alertes urgentes, rappels de visite et de paiement), push, in-app et courrier postal. Aucun envoi réel n'est simulé : chaque émission est journalisée avec destinataire, prestataire prévu et statut, prête à être branchée ;
+- **automatisation** : huit scénarios système (bienvenue locataire, rappel loyer J-3, relance impayé, anniversaire de bail, rappel renouvellement, confirmation de paiement, confirmation de visite, bilan mensuel propriétaire), règles et canaux personnalisables, exécution idempotente (un même événement n'est pas renvoyé) ;
+- **centre de préférences** : choix des canaux par type de notification, fréquence (`immediate`, `daily_digest`, `weekly`, `never`) et désabonnement par jeton public ;
+- **historique complet** : recherche avancée par canal, type, contact, bien, dossier, locataire, propriétaire et texte.
+
+## Module 11 — Gestion documentaire (GED)
+
+Le module documentaire ajoute :
+
+- **arborescence** : dossiers et sous-dossiers organisés par bien, propriétaire, locataire, contrat ou type de document ;
+- **upload et stockage** : fichier unique ou lot, formats PDF / images / Word / Excel, taille max configurable, compression automatique des images, versioning ;
+- **génération automatique** : onze modèles (bail, quittance, appel de loyer, état des lieux, lettre de relance, attestation de loyer, lettre de congé, mise en demeure, mandat de gestion, avis d'échéance, régularisation de charges), fusion de variables et prévisualisation avant génération PDF ;
+- **signature électronique** : enveloppes DocuSign / Yousign / HelloSign journalisées (sans appel prestataire), niveaux simple / avancé / qualifié, circuit multi-signataires ordonné, suivi de statut et dossier de preuve SHA-256 à valeur d'archivage ;
+- **OCR et classification** : lecture automatique (pypdf / Tesseract), extraction de montants, dates, emails et références, classification par mots-clés — une extraction insuffisante ne classe jamais un document avec certitude ;
+- **recherche** : plein texte sur titre, nom de fichier, OCR et tags, filtres type / date / bien / contact ;
+- **sécurité et conformité** : droits par rôle (lecture / écriture / suppression / administration), journal d'audit (consultation, téléchargement, modification), gel juridique, durée de rétention paramétrable et effacement RGPD refusé tant que la rétention ou le gel s'applique.
+
 ## Démarrage avec Docker
 
 ```bash
@@ -256,6 +278,25 @@ Sans `STRIPE_SECRET_KEY`, l'endpoint de paiement répond `503` au lieu de simule
 - `POST /custom-reports/{id}/schedule`, `POST /reports/schedules/run` — planification d'envoi automatique ; `GET /reports/shared/{token}` — partage sans authentification ; `GET /executions` — historique ;
 - `GET /exports?dataset=&format=` — exports API pour BI externe (json, pdf, excel, csv, word) ;
 - `POST|GET /alert-rules`, `PUT|DELETE /alert-rules/{id}`, `POST /alerts/evaluate`, `GET /alert-events`, `POST /alert-events/{id}/ack` — alertes paramétrables à seuils personnalisables et notifications temps réel.
+
+### Communication et notifications (`/api/comms`)
+
+- `POST|GET /conversations`, `GET /conversations/{id}`, `POST /conversations/{id}/messages`, `POST /conversations/{id}/messages/{id}/attachments`, `PUT /conversations/{id}/archive`, `GET /messages/search` — messagerie interne ;
+- `GET|POST /templates`, `PUT /templates/{id}` — modèles d'email personnalisables ;
+- `POST /dispatch` — envoi multicanal journalisé (email, SMS, push, in-app, postal) ;
+- `GET /in-app`, `PUT /in-app/{id}/read` — notifications in-app ;
+- `GET /track/{token}` — pixel de suivi d'ouverture (public) ; `GET /unsubscribe/{token}` — désabonnement ;
+- `GET|PUT /preferences` — centre de préférences ;
+- `GET|POST /scenarios`, `PUT /scenarios/{id}`, `POST /scenarios/run` — scénarios automatisés et exécution cron ;
+- `GET /history` — historique avancé (canal, type, contact, bien, dossier, recherche texte).
+
+### Gestion documentaire (`/api/ged`)
+
+- `GET|PUT /settings`, `GET /types` — paramètres (taille max, compression, rétention) et catalogue de types ;
+- `POST|GET /folders`, `GET /folders/tree`, `PUT /folders/{id}` — arborescence ;
+- `POST /documents`, `POST /documents/batch`, `GET /documents`, `GET|PUT|DELETE /documents/{id}`, `POST /documents/{id}/versions`, `GET /documents/{id}/download`, `GET /documents/{id}/audit`, `POST /documents/{id}/ocr`, `POST /documents/{id}/erase` — cycle de vie documentaire ;
+- `GET|POST /templates`, `PUT /templates/{id}`, `POST /generate` — modèles et génération / prévisualisation ;
+- `POST /signatures`, `POST /signatures/{id}/send`, `GET /signatures/{id}`, `POST /signatures/{id}/signers/{id}/sign|decline`, `GET /signatures/{id}/evidence` — circuit de signature et dossier de preuve.
 
 ## Scoring
 

@@ -32,6 +32,6 @@ def init_db():
     supprimée ni recréée.
     """
     from app.models import accounting, lease_contract, message, notification, owner, property, report, tenant  # noqa: F401
-    from app.models import finance, maintenance, condo, crm, reporting  # noqa: F401
+    from app.models import finance, maintenance, condo, crm, reporting, communication, ged  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
