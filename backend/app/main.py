@@ -26,6 +26,8 @@ from app.routes.maintenance import router as maintenance_router
 from app.routes.condo import router as condo_router
 from app.routes.crm import router as crm_router
 from app.routes.reporting import router as reporting_router
+from app.routes.comms import router as comms_router
+from app.routes.ged import router as ged_router
 from app.routes import owner_portal, communication
 from app.config import settings
 from app.database import init_db
@@ -79,9 +81,11 @@ app.include_router(finance_router)
 app.include_router(maintenance_router)
 app.include_router(condo_router)
 
-# Modules 8 et 9 : CRM / gestion commerciale et tableau de bord / reporting
+# Modules 8 à 11 : CRM, reporting, communication, GED
 app.include_router(crm_router)
 app.include_router(reporting_router)
+app.include_router(comms_router)
+app.include_router(ged_router)
 
 # Routeurs du portail propriétaire et de la communication
 app.include_router(owner_portal.router)
