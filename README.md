@@ -31,6 +31,32 @@ Le module contractuel ajoute :
 
 Les règles de plafonnement sont datées, sourcées et administrables. Aucune valeur réglementaire susceptible d'évoluer n'est simulée : sans règle applicable, le calcul restitue la hausse indiciaire non plafonnée et l'indique dans son détail.
 
+## Module 5 — Gestion financière et comptabilité
+
+Le module financier et comptable ajoute :
+
+- **appels de loyer automatiques** : génération mensuelle idempotente, échéance selon la journée de paiement du bail, complément des méthodes déjà gérées par le module locataire ;
+- **encaissement multi-canal** : CB, prélèvement, virement, chèque, espèces (avec reçu), quittance générée automatiquement et écriture comptable automatique ;
+- **impayés** : détection automatique des retards, calcul des pénalités d'intérêt légal, workflow de relance J+5 (amiable/email), J+15 (ferme/email+SMS), J+30 (mise en demeure/AR), J+60 (commandement), J+90 (contentieux), plans d'apurement avec échéancier et dossiers contentieux (huissier, tribunal, historique d'actions) ;
+- **charges** : charges récupérables / non récupérables, répartition par tantièmes, surface, occupants ou clé personnalisée, budget prévisionnel et régularisation annuelle (provision vs réel) ;
+- **comptabilité générale** : plan comptable immobilier, écritures automatiques équilibrées, journal, grand livre, balance générale, rapprochement bancaire (import OFX/CSV/MT940, matching automatique et manuel), gestion multi-comptes bancaires, TVA et clôture ;
+- **compte de gérance** : relevé de gestion, honoraires, versements (déjà couvert par le module de transactions propriétaire) ;
+- **facturation** : factures d'honoraires et de prestations, devis, avoirs, numérotation automatique, TVA / exonération ;
+- **dépôt de garantie** : encaissement, suivi, retenues justifiées, délai légal de restitution (1 ou 2 mois) et lettre de restitution ;
+- **exports comptables** : FEC (`JournalCode|Date|Compte|Débit|Crédit|Libellé`), CSV, Sage, QuickBooks, Ciel et format personnalisable.
+
+## Module 6 — Maintenance et travaux
+
+Le module maintenance ajoute :
+
+- **ticketing / demandes d'intervention** : création par le locataire (portail), le gestionnaire, le propriétaire ou automatique (préventif), catégorisation (plomberie, électricité, chauffage, serrurerie, peinture, toiture, parties communes, autre), niveau d'urgence (faible, moyen, élevé, critique), pièces jointes photo/vidéo et localisation ;
+- **workflow d'intervention** : statuts `nouveau → validation propriétaire → validé → prestataire assigné → devis → planifié → en cours → terminé → contrôle qualité → clôturé`, notifications à chaque étape, SLA par niveau d'urgence et escalade automatique ;
+- **prestataires** : annuaire (coordonnées, spécialités, zones, tarifs, assurances, certifications, note), comparaison de devis, bon de commande et évaluation post-intervention ;
+- **maintenance préventive** : planification récurrente (ramonage, chaudière, détecteurs de fumée, espaces verts, nettoyage, personnalisable), calendrier, alertes automatiques et matérialisation des tâches ;
+- **travaux lourds** : projet, budget prévisionnel, suivi d'avancement, planning de phases (Gantt), documents (permis, devis, factures), réception des travaux ;
+- **suivi financier** : budget maintenance par bien, coûts réels vs prévisionnel, imputation propriétaire / locataire / copropriété et reporting ;
+- **inventaire des équipements** : liste par bien, date d'installation, garantie, contrat d'entretien, historique des pannes et date de remplacement prévisionnelle.
+
 ## Démarrage avec Docker
 
 ```bash
@@ -110,6 +136,39 @@ Sans `STRIPE_SECRET_KEY`, l'endpoint de paiement répond `503` au lieu de simule
 - sous-routes `/api/leases/{id}/inspections` — pièces, équipements, compteurs, clés, photos, comparaison, retenues, signatures et PDF ;
 - `PUT /api/leases/{id}/inspections/{inspection_id}/mobile-sync` — synchronisation transactionnelle d'une application mobile/hors ligne.
 
+### Gestion financière et comptabilité (`/api/finance`)
+
+- `POST /bank-accounts`, `GET|PUT /bank-accounts/{id}` — multi-comptes bancaires ;
+- `POST /bank-accounts/{id}/statements` — import d'un relevé (lignes) ; `GET /bank-accounts/{id}/statements` ;
+- `POST /reconciliations` → `/reconciliations/{id}/auto-match`, `/matches` (manuel), `/reconcile` — rapprochement bancaire ;
+- `POST /rent-calls/generate?month=YYYY-MM` — génération mensuelle idempotente ;
+- `POST /payments/{payment_id}/record?amount=&method=` — encaissement (CB, virement, chèque, espèces…) ;
+- `POST /late-payments/detect` — détection automatique ; `GET /late-payments` ; `GET /late-payments/{id}` ;
+- `POST /late-payments/{id}/advance` — relance J+5/J+15/J+30/J+60/J+90 ; `POST /late-payments/{id}/penalty` — pénalités ;
+- `POST /late-payments/{id}/case`, `POST /cases/{id}/actions` — dossier contentieux ;
+- `POST /payment-plans`, `GET /payment-plans/{id}`, `POST /payment-plans/installments/{id}/pay` — plan d'apurement ;
+- `POST /charges`, `GET /charges`, `POST /charges/{id}/allocate` — charges et répartition ;
+- `POST /allocation-rules`, `POST /charges/regularize?lease_id=&year=`, `POST /charges/budget` — clés, régularisation, budget ;
+- `POST /accounts/standard`, `GET /accounts`, `POST /accounts` — plan comptable ;
+- `POST /journal-entries`, `GET /journal-entries`, `POST /journal-entries/{id}/validate` — journal ;
+- `GET /trial-balance`, `GET /general-ledger/{account_id}` — balance et grand livre ;
+- `POST /invoices`, `GET /invoices`, `PUT /invoices/{id}/status`, `POST /invoices/management-fee` — facturation ;
+- `POST /deposits`, `GET /deposits/{id}`, `POST /deposits/{id}/deductions`, `POST /deposits/{id}/restitution`, `POST /deposits/{id}/return` — dépôt de garantie ;
+- `POST /exports`, `GET /exports` — exports FEC/CSV/Sage/QuickBooks/Ciel.
+
+### Maintenance et travaux (`/api/maintenance`)
+
+- `POST /providers`, `GET /providers`, `GET|PUT /providers/{id}` — annuaire des prestataires ;
+- `POST /tickets`, `GET /tickets`, `GET|PUT /tickets/{id}`, `POST /tickets/{id}/status` — ticketing workflow ;
+- `POST /tickets/{id}/quotes`, `/quotes/{quote_id}/accept`, `GET /tickets/{id}/quotes/compare` — devis ;
+- `POST /tickets/{id}/evaluations`, `POST /tickets/{id}/attachments` — évaluation et pièces jointes ;
+- `POST /tickets/escalate` — escalade SLA automatique ;
+- `POST /preventive/plans`, `GET /preventive/plans`, `POST /preventive/materialize`, `POST /preventive/tasks/{id}/complete` — maintenance préventive ;
+- `GET /calendar?start_date=&end_date=` — calendrier de maintenance ;
+- `POST /projects`, `GET /projects`, `GET|PUT /projects/{id}`, `POST /projects/{id}/phases`, `POST /projects/{id}/documents`, `POST /projects/{id}/receive` — travaux lourds ;
+- `POST /equipment`, `GET /equipment`, `GET|PUT /equipment/{id}`, `POST /equipment/{id}/logs`, `GET /equipment/{id}/history` — inventaire ;
+- `POST /expenses`, `GET /expenses`, `GET /budget?property_id=&year=`, `GET /reporting?year=` — suivi financier.
+
 ## Scoring
 
 Le score de candidature (0–100) est explicable et versionné. Il porte uniquement sur :
@@ -131,4 +190,4 @@ cd backend
 python -m unittest discover -s tests -v
 ```
 
-Les tests utilisent SQLite et couvrent le dépôt d'une candidature, l'OCR, le scoring, la validation, l'activation du portail, les alertes de retard, les quittances, les modèles de bail, les révisions plafonnées, la signature avec dossier de preuve et la comparaison des états des lieux.
+Les tests utilisent SQLite et couvrent le dépôt d'une candidature, l'OCR, le scoring, la validation, l'activation du portail, les alertes de retard, les quittances, les modèles de bail, les révisions plafonnées, la signature avec dossier de preuve, la comparaison des états des lieux, ainsi que les modules 5 et 6 : appels de loyer, encaissement, impayés et plans d'apurement, charges et régularisation, écritures et balance, facturation, dépôt de garantie, exports, workflow de tickets avec SLA/escalade, devis, maintenance préventive, travaux et équipements.

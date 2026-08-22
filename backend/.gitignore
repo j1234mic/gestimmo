@@ -21,6 +21,12 @@ ENV/
 # FastAPI / Uvicorn
 *.log
 
+# Bases de données locales (runtime / tests)
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+
 # IDE
 .vscode/
 .idea/
