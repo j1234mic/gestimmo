@@ -4,7 +4,7 @@ from pathlib import Path
 class Settings:
     ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
     APP_NAME = "API Gestion Immobilière"
-    APP_VERSION = "1.0.0"
+    APP_VERSION = "1.2.0"
     SECRET_KEY = os.getenv("SECRET_KEY", "ma-cle-secrete-2024")
     ALLOWED_ORIGINS = ["*"]
     UPLOAD_DIR = os.getenv("UPLOAD_DIR", "uploads")
