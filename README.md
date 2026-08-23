@@ -145,6 +145,14 @@ Le module cartographique ajoute :
 - **secteurs GeoJSON** : polygones validés, affectation d'agents, calcul point-dans-polygone, rattachement des biens et statistiques par zone ;
 - **tournées** : planification des visites, optimisation par plus proche voisin, ordre des arrêts, heures d'arrivée/départ, attente/retard estimés, distance et temps total, avec conservation du plan calculé.
 
+## Module 14 — Application mobile
+
+L'API expose un socle mobile pour les applications gestionnaire, locataire, propriétaire et prestataire : `GET /api/mobile/dashboard`, synchronisation offline idempotente via `POST/GET /api/mobile/sync`, photos géolocalisées via `/api/mobile/media`. Les écrans métier réutilisent les tickets, baux, états des lieux, messages, notifications et carte existants.
+
+## Module 15 — Assurances et sinistres
+
+Contrats PNO, MRH, GLI, responsabilité civile et copropriété (`/api/insurance/contracts`), demandes d'attestations, déclarations et suivi des sinistres avec preuves (`/api/insurance/claims`), ainsi qu'un reporting échéances et indemnisation (`/api/insurance/reporting`). Les opérations sont protégées par les droits RBAC existants.
+
 ## Démarrage avec Docker
 
 ```bash
