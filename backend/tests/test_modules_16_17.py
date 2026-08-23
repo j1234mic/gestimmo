@@ -162,6 +162,113 @@ class IntelligenceIntegrationTest(unittest.TestCase):
         self.assertEqual(appointment.status_code, 201, appointment.text)
         self.assertEqual(appointment.json()["status"], "requested")
 
+    def test_manager_assistant_answers_each_intent_from_real_data(self):
+        """L'assistant gestionnaire ne doit jamais répondre la même phrase générique.
+
+        Le moteur d'intentions doit distinguer une recherche, une demande
+        d'aide, une question sur les impayés, les tickets, les échéances de bail
+        et un déclenchement de workflow, en s'appuyant sur les données réelles.
+        """
+        property_id = self._property(9, 62, 1_150, 340_000)
+        tenant_response = self.client.post(
+            "/api/tenants/", headers=self.headers,
+            json={
+                "first_name": "Bruno", "last_name": "Lefevre",
+                "email": "bruno.lefevre@example.fr", "phone": "0600000042",
+            },
+        )
+        self.assertEqual(tenant_response.status_code, 201, tenant_response.text)
+        tenant_id = tenant_response.json()["id"]
+        lease = self.client.post(
+            f"/api/tenants/{tenant_id}/leases", headers=self.headers,
+            json={
+                "property_id": property_id, "status": "active",
+                "start_date": date.today().isoformat(),
+                "end_date": (date.today() + timedelta(days=45)).isoformat(),
+                "monthly_rent": 1_150,
+            },
+        )
+        self.assertEqual(lease.status_code, 201, lease.text)
+        lease_reference = lease.json()["reference"]
+        ticket = self.client.post(
+            "/api/maintenance/tickets", headers=self.headers,
+            json={
+                "property_id": property_id, "source": "manager",
+                "category": "plomberie", "urgency": "eleve",
+                "title": "Fuite au plafond", "description": "Infiltration visible dans le séjour.",
+            },
+        )
+        self.assertEqual(ticket.status_code, 201, ticket.text)
+        ticket_reference = ticket.json()["reference"]
+        workflow = self.client.post(
+            "/api/ai/automation/workflows", headers=self.headers,
+            json={
+                "name": "Relance des impayés", "event_type": "payment.late",
+                "actions": [{"type": "create_task", "parameters": {"title": "Relancer le locataire"}}],
+            },
+        )
+        self.assertEqual(workflow.status_code, 201, workflow.text)
+
+        session = self.client.post("/api/ai/assistant/sessions", headers=self.headers, json={})
+        self.assertEqual(session.status_code, 201, session.text)
+        session_id = session.json()["session_id"]
+
+        def ask(message):
+            response = self.client.post(
+                f"/api/ai/assistant/sessions/{session_id}/messages",
+                headers=self.headers, json={"message": message},
+            )
+            self.assertEqual(response.status_code, 201, response.text)
+            return response.json()
+
+        greeting = ask("Bonjour")
+        self.assertEqual(greeting["intent"], "manager_help")
+
+        prompt = ask("je recherche un bail")
+        self.assertEqual(prompt["intent"], "search_prompt")
+        self.assertIn(lease_reference, prompt["answer"])
+
+        # Recherche par nom de locataire : le bail doit remonter.
+        by_name = ask("bail de Lefevre")
+        self.assertEqual(by_name["intent"], "search_results")
+        self.assertIn(lease_reference, by_name["answer"])
+        self.assertEqual(by_name["results"][0]["type"], "lease")
+
+        # Les accents et la casse ne doivent pas changer le résultat.
+        unaccented = ask("Quels sont les impayes en cours ?")
+        self.assertEqual(unaccented["intent"], "manager_unpaid")
+        self.assertEqual(ask("Quels sont les impayés en cours ?")["intent"], "manager_unpaid")
+
+        tickets = ask("tickets en cours")
+        self.assertEqual(tickets["intent"], "manager_tickets")
+        self.assertIn(ticket_reference, tickets["answer"])
+
+        deadlines = ask("quels baux arrivent à échéance ?")
+        self.assertEqual(deadlines["intent"], "manager_lease_deadlines")
+        self.assertIn(lease_reference, deadlines["answer"])
+
+        portfolio = ask("quel est le taux d'occupation du portefeuille ?")
+        self.assertEqual(portfolio["intent"], "manager_portfolio")
+        self.assertIn("100.0 %", portfolio["answer"])
+
+        automation = ask("Déclencher un workflow")
+        self.assertEqual(automation["intent"], "manager_workflow")
+        self.assertIn("payment.late", automation["answer"])
+        self.assertTrue(automation["proposed_action"]["requires_confirmation"])
+
+        creation = ask("créer un ticket")
+        self.assertEqual(creation["intent"], "manager_create_ticket")
+        self.assertEqual(creation["proposed_action"]["type"], "create_ticket")
+
+        # Aucune de ces réponses n'est identique : le bug d'origine renvoyait
+        # toujours la même phrase de présentation.
+        answers = [
+            greeting["answer"], prompt["answer"], by_name["answer"], unaccented["answer"],
+            tickets["answer"], deadlines["answer"], portfolio["answer"],
+            automation["answer"], creation["answer"],
+        ]
+        self.assertEqual(len(set(answers)), len(answers))
+
     def test_workflow_rules_actions_and_idempotency(self):
         workflow = self.client.post(
             "/api/ai/automation/workflows", headers=self.headers,
