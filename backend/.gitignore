@@ -1,6 +1,7 @@
 # Variables d'environnement
 .env
 .env.*
+!.env.example
 .env.local
 .env.production
 .env.development
@@ -21,6 +22,7 @@ ENV/
 
 # FastAPI / Uvicorn
 *.log
+logs/
 
 # Bases de données locales (runtime / tests)
 *.db

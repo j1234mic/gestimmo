@@ -20,11 +20,13 @@ services:
     restart: unless-stopped
     depends_on:
       - postgres
+    env_file:
+      - .env
     environment:
-      - DATABASE_URL=postgresql://immo_user:immo_password_2024@postgres:5432/immo_db
-      - AUTO_CREATE_TABLES=true
-      - DEBUG=false
-      - ENVIRONMENT=production
+      - DATABASE_URL=${DATABASE_URL:-postgresql://immo_user:immo_password_2024@postgres:5432/immo_db}
+      - AUTO_CREATE_TABLES=${AUTO_CREATE_TABLES:-true}
+      - DEBUG=${DEBUG:-false}
+      - ENVIRONMENT=${ENVIRONMENT:-production}
       - SECRET_KEY=${SECRET_KEY:-change-this-secret-before-production}
       - SMS_WEBHOOK_URL=${SMS_WEBHOOK_URL:-}
       - SMS_WEBHOOK_TOKEN=${SMS_WEBHOOK_TOKEN:-}
