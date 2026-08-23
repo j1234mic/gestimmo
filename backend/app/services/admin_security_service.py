@@ -58,6 +58,7 @@ pwd_context = CryptContext(schemes=["sha256_crypt"], deprecated="auto")
 ALL_MODULES = [
     "properties", "owners", "tenants", "leases", "finance", "maintenance",
     "condo", "crm", "reporting", "communication", "ged", "administration", "geolocation",
+    "artificial_intelligence", "integrations",
 ]
 ALL_ACTIONS = ["create", "read", "update", "delete", "export", "admin"]
 PROFILE_DEFINITIONS = {
@@ -253,9 +254,24 @@ def bootstrap_security() -> None:
     db = SessionLocal()
     try:
         roles = {}
-        for key in PROFILE_DEFINITIONS:
+        for key, profile in PROFILE_DEFINITIONS.items():
             role = db.query(AdminRole).filter(AdminRole.profile_key == key, AdminRole.is_system == True).first()
-            roles[key] = role or _create_system_role(db, key)
+            is_new = role is None
+            role = role or _create_system_role(db, key)
+            roles[key] = role
+            # Migration additive des profils système : les modules livrés après
+            # l'installation deviennent accessibles sans écraser les droits
+            # déjà personnalisés ni les rôles non système. Un rôle tout juste
+            # créé possède déjà toutes les permissions ajoutées par le helper.
+            existing_modules = set(profile["modules"]) if is_new else {
+                permission.module for permission in role.permissions
+            }
+            for module, actions in profile["modules"].items():
+                if module not in existing_modules:
+                    db.add(RolePermission(
+                        role_id=role.id, module=module, actions=actions,
+                        scope_type=profile["scope"],
+                    ))
         if not db.query(SecurityPolicy).filter(SecurityPolicy.organization_id.is_(None)).first():
             db.add(SecurityPolicy())
         if not db.query(BackupPolicy).first():
