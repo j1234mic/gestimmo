@@ -31,6 +31,7 @@ from app.routes.comms import router as comms_router
 from app.routes.ged import router as ged_router
 from app.routes.admin_security import router as admin_security_router, public_router as privacy_router
 from app.routes.geolocation import router as geolocation_router
+from app.routes.mobile_insurance import router as mobile_insurance_router
 from app.routes import owner_portal, communication
 from app.config import settings
 from app.database import init_db, SessionLocal
@@ -99,6 +100,7 @@ app.include_router(ged_router)
 app.include_router(admin_security_router)
 app.include_router(privacy_router)
 app.include_router(geolocation_router)
+app.include_router(mobile_insurance_router)
 
 # Routeurs du portail propriétaire et de la communication
 app.include_router(owner_portal.router)
