@@ -582,6 +582,10 @@ _SEARCH_VERBS = {
 }
 _GREETINGS = {"bonjour", "bonsoir", "salut", "hello", "hey", "coucou", "bjr", "hi"}
 _THANKS = {"merci", "thanks", "remercie"}
+# Petits tours de parole : ils sont traités avant les mots-clés métier pour
+# éviter qu'un simple « oui » ou « à bientôt » ne déclenche une recherche.
+_AFFIRMATIONS = {"oui", "ouais", "daccord", "accord", "parfait", "ok", "okay", "bien", "volontiers"}
+_GOODBYE_WORDS = {"revoir", "bientot", "bientôt", "bye", "adieu"}
 _HELP_WORDS = {"aide", "aider", "help", "capacites", "fonctionnalites", "sais", "peux", "possibilites"}
 _UNPAID_WORDS = {"impaye", "impayes", "impayees", "retard", "retards", "relance", "relances", "arriere", "arrieres", "contentieux", "recouvrement"}
 _DUE_WORDS = {"echeance", "echeances", "expire", "expiration", "expirent", "renouvellement", "renouveler", "fin", "terme", "preavis"}
@@ -1148,19 +1152,89 @@ def get_chat_session(db: Session, session_identifier: str, actor_type: str, acto
     return row
 
 
-def answer_chat(db: Session, session: ChatSession, message: str, context: dict) -> dict:
-    """Route le message vers l'intention la plus probable puis interroge les données.
+def _last_assistant_message(db: Session, session: ChatSession) -> Optional[ChatMessage]:
+    """Retourne le dernier tour de l'assistant, sans faire confiance au client.
 
-    Chaque réponse est construite à partir du portefeuille réel : le message
-    générique de présentation n'est plus utilisé que lorsque l'utilisateur
-    demande explicitement de l'aide.
+    Le moteur reste volontairement local et déterministe, mais il peut ainsi
+    tenir compte du tour précédent : une réponse comme « oui, pour demain »
+    n'est plus traitée comme une demande inconnue.
+    """
+    return (
+        db.query(ChatMessage)
+        .filter(ChatMessage.session_id == session.id, ChatMessage.role == "assistant")
+        .order_by(ChatMessage.id.desc())
+        .first()
+    )
+
+
+def _conversational_turn(
+    db: Session, session: ChatSession, message: str, words: set[str]
+) -> Optional[dict]:
+    """Gère les petits tours de parole et les réponses de suivi.
+
+    Ce n'est pas un faux appel à un modèle externe : les intentions métier
+    restent celles du moteur existant. Cette couche rend simplement le dialogue
+    plus naturel et conserve l'action proposée quand l'utilisateur acquiesce.
+    """
+    normalized = _normalize_text(message).strip()
+    previous = _last_assistant_message(db, session)
+    previous_meta = (previous.metadata_json or {}) if previous else {}
+    previous_action = previous_meta.get("action") if previous_meta else None
+
+    if words & _GREETINGS and len(words) <= 3:
+        return _reply(
+            "greeting", 0.98,
+            "Bonjour ! Je suis là pour vous aider. Qu'est-ce que vous souhaitez faire aujourd'hui ?",
+            TENANT_SUGGESTIONS if session.actor_type == "tenant" else MANAGER_SUGGESTIONS,
+        )
+    if normalized in {"au revoir", "a bientot", "à bientôt", "bye", "adieu", "c'est tout", "ca ira", "ça ira"}:
+        return _reply(
+            "smalltalk", 0.94,
+            "Très bien, je reste disponible si vous avez besoin. Bonne journée !",
+            ["Poser une question", "Voir l'aide"],
+        )
+    if normalized in {"ca va", "ça va", "comment vas tu", "comment allez vous", "qui es tu", "qui es-tu"}:
+        return _reply(
+            "smalltalk", 0.94,
+            "Je vais bien, merci ! Je suis votre assistant de gestion. Dites-moi simplement ce que vous voulez vérifier et je vous accompagne étape par étape.",
+            TENANT_SUGGESTIONS if session.actor_type == "tenant" else MANAGER_SUGGESTIONS,
+        )
+    if words & _AFFIRMATIONS and previous_action:
+        required = previous_action.get("required_fields", [])
+        labels = {
+            "property_id": "le bien concerné", "title": "un titre",
+            "description": "une description", "category": "la catégorie",
+            "urgency": "le niveau d'urgence", "starts_at": "la date et l'heure",
+            "purpose": "le motif", "event_type": "le type d'événement",
+            "payload": "les informations de l'événement",
+        }
+        missing = [labels.get(field, field.replace("_", " ")) for field in required[:3]]
+        fields = " et ".join(missing) if missing else "les informations nécessaires"
+        return _reply(
+            "conversation_follow_up", 0.86,
+            "Parfait, je m'en occupe. Pour préparer cela correctement, il me manque encore "
+            f"{fields}. Je ne lancerai rien sans votre confirmation finale.",
+            TENANT_SUGGESTIONS if session.actor_type == "tenant" else MANAGER_SUGGESTIONS,
+            action=previous_action,
+        )
+    return None
+
+
+def answer_chat(db: Session, session: ChatSession, message: str, context: dict) -> dict:
+    """Répond dans un dialogue continu, avec données réelles et contexte récent.
+
+    Chaque réponse est construite à partir du portefeuille réel. Les tours de
+    parole simples (salutations, remerciements, acquiescement) et les réponses
+    courtes à une question précédente sont traités avant les intentions métier,
+    ce qui évite l'effet « formulaire à mots-clés ».
     """
     db.add(ChatMessage(session_id=session.id, role="user", content=message, metadata_json=context))
     words = _normalize_words(message)
+    outcome = _conversational_turn(db, session, message, words)
 
-    if session.actor_type == "manager":
+    if outcome is None and session.actor_type == "manager":
         outcome = _resolve_manager_intent(db, message, words)
-    else:
+    elif outcome is None:
         outcome = _resolve_tenant_intent(db, session, message, words)
 
     assistant = ChatMessage(
