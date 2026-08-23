@@ -35,16 +35,17 @@ from app.routes.mobile_insurance import router as mobile_insurance_router
 from app.routes.ai_automation import router as ai_router, tenant_router as tenant_ai_router
 from app.routes.integrations import router as integrations_router, external_router as external_api_router
 from app.routes import owner_portal, communication
-from app.config import settings
+from app.config import configure_logging, settings
 from app.database import init_db, SessionLocal
 
 # Import des middlewares personnalisés depuis core/security.py
 from app.core.security import SecurityHeadersMiddleware, RequestSanitizer
 from app.middleware.audit import AuditTrailMiddleware
+from app.middleware.rate_limit import RateLimitMiddleware
 
 # Configuration du logging
+configure_logging(settings)
 app_logger = logging.getLogger("app")
-logging.basicConfig(level=logging.INFO)
 
 # Création de l'application FastAPI
 app = FastAPI(
@@ -58,11 +59,11 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
-# 1. Middleware CORS
+# 1. Middleware CORS — origines lues depuis ALLOWED_ORIGINS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # En production, remplacez par les domaines autorisés
-    allow_credentials=True,
+    allow_origins=settings.ALLOWED_ORIGINS,
+    allow_credentials=settings.cors_allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -76,6 +77,9 @@ app.add_middleware(RequestSanitizer)
 # 4. Journal minimal de toutes les mutations HTTP (les services ajoutent le
 # détail avant/après lorsqu'il est disponible).
 app.add_middleware(AuditTrailMiddleware)
+
+# 5. Rate limiting global (RATE_LIMIT_REQUESTS / RATE_LIMIT_WINDOW)
+app.add_middleware(RateLimitMiddleware)
 
 # Inclusion des routeurs
 app.include_router(properties_router)
