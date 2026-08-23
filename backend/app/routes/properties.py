@@ -319,7 +319,12 @@ async def upload_property_photos(
 
         # Lire et compresser l'image
         content = await file.read()
-        
+        if len(content) > settings.MAX_UPLOAD_SIZE:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Fichier trop volumineux (max {settings.MAX_UPLOAD_SIZE} octets)",
+            )
+
         try:
             from PIL import Image
             import io

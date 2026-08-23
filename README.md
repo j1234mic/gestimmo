@@ -215,12 +215,32 @@ Les tables absentes sont créées au démarrage (`AUTO_CREATE_TABLES=true`). Pou
 
 ```bash
 cd backend
+cp .env.example .env   # puis adapter SECRET_KEY et DATABASE_URL
 python -m venv .venv
 . .venv/bin/activate
 pip install -r requirements.txt
+# Hors Docker, pointez vers localhost plutôt que l'hôte `postgres` :
 export DATABASE_URL='postgresql://immo_user:immo_password_2024@localhost:5432/immo_db'
 uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
+
+Les variables de `backend/.env` sont chargées automatiquement (`python-dotenv`). Docker Compose lit le même fichier via `env_file`.
+
+| Variable | Utilité | Valeur par défaut |
+|---|---|---|
+| `ENVIRONMENT` | Masque les codes 2FA dès que la valeur est `production` | `development` |
+| `DEBUG` | Active l'écho SQLAlchemy | `true` |
+| `DATABASE_URL` | URL SQLAlchemy | PostgreSQL local |
+| `SECRET_KEY` | Signature JWT et dérivation des secrets | valeur de développement |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | Durée par défaut d'un access token | `30` |
+| `REFRESH_TOKEN_EXPIRE_DAYS` | Durée par défaut d'un refresh token | `7` |
+| `RATE_LIMIT_REQUESTS` | Requêtes max par IP sur la fenêtre | `100` |
+| `RATE_LIMIT_WINDOW` | Fenêtre de rate limiting, en secondes | `60` |
+| `ALLOWED_ORIGINS` | Origines CORS, séparées par des virgules | `*` |
+| `UPLOAD_DIR` | Médias publics | `uploads` |
+| `MAX_UPLOAD_SIZE` | Taille max d'un fichier uploadé, en octets | `5242880` |
+| `LOG_LEVEL` | Niveau de journalisation | `INFO` |
+| `LOG_FILE` | Fichier de logs (relatif à `backend/`) | `logs/app.log` |
 
 ## Configuration du module locataire
 
