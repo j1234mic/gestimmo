@@ -1,6 +1,7 @@
 # backend/app/main.py
 
 from fastapi import FastAPI
+import asyncio
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 import logging
@@ -28,12 +29,15 @@ from app.routes.crm import router as crm_router
 from app.routes.reporting import router as reporting_router
 from app.routes.comms import router as comms_router
 from app.routes.ged import router as ged_router
+from app.routes.admin_security import router as admin_security_router, public_router as privacy_router
+from app.routes.geolocation import router as geolocation_router
 from app.routes import owner_portal, communication
 from app.config import settings
-from app.database import init_db
+from app.database import init_db, SessionLocal
 
 # Import des middlewares personnalisés depuis core/security.py
 from app.core.security import SecurityHeadersMiddleware, RequestSanitizer
+from app.middleware.audit import AuditTrailMiddleware
 
 # Configuration du logging
 app_logger = logging.getLogger("app")
@@ -61,6 +65,10 @@ app.add_middleware(SecurityHeadersMiddleware)
 # 3. Middleware de nettoyage des requêtes
 app.add_middleware(RequestSanitizer)
 
+# 4. Journal minimal de toutes les mutations HTTP (les services ajoutent le
+# détail avant/après lorsqu'il est disponible).
+app.add_middleware(AuditTrailMiddleware)
+
 # Inclusion des routeurs
 app.include_router(properties_router)
 app.include_router(auth_router)
@@ -87,6 +95,11 @@ app.include_router(reporting_router)
 app.include_router(comms_router)
 app.include_router(ged_router)
 
+# Modules 12 et 13 : administration/sécurité et cartographie
+app.include_router(admin_security_router)
+app.include_router(privacy_router)
+app.include_router(geolocation_router)
+
 # Routeurs du portail propriétaire et de la communication
 app.include_router(owner_portal.router)
 app.include_router(communication.router)
@@ -96,6 +109,7 @@ app.include_router(communication.router)
 # authentifiées de téléchargement.
 os.makedirs(settings.upload_dir_path, exist_ok=True)
 os.makedirs(settings.private_upload_dir_path, exist_ok=True)
+os.makedirs(settings.backup_dir_path, exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=str(settings.upload_dir_path)), name="uploads")
 
 # Endpoints de base
@@ -107,9 +121,45 @@ async def health():
 async def root():
     return {"message": "API OK", "docs": "/docs"}
 
+async def _backup_scheduler():
+    """Déclencheur horaire léger du backup quotidien configuré.
+
+    Le premier passage est différé : le démarrage HTTP n'est jamais bloqué par
+    une copie de base. ``run_daily_backup_if_due`` garantit un seul backup par
+    jour même avec plusieurs réveils.
+    """
+    from app.services.admin_security_service import run_daily_backup_if_due
+
+    while True:
+        await asyncio.sleep(3600)
+
+        def process():
+            db = SessionLocal()
+            try:
+                run_daily_backup_if_due(db)
+            except Exception:
+                app_logger.exception("Échec du planificateur de sauvegarde")
+            finally:
+                db.close()
+
+        await asyncio.to_thread(process)
+
+
 # Événement de démarrage
 @app.on_event("startup")
 async def startup():
     if settings.AUTO_CREATE_TABLES:
         init_db()
+    app.state.backup_task = asyncio.create_task(_backup_scheduler())
     app_logger.info("🚀 API démarrée !")
+
+
+@app.on_event("shutdown")
+async def shutdown():
+    task = getattr(app.state, "backup_task", None)
+    if task:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass

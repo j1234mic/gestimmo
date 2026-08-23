@@ -27,7 +27,7 @@ def create_property(db: Session, property_data: PropertyCreate):
         reference = generate_reference()
         existing = db.query(Property).filter(Property.reference == reference).first()
     
-    property_dict = property_data.dict()
+    property_dict = property_data.model_dump()
     property_dict["reference"] = reference
     
     if "status" not in property_dict or property_dict["status"] is None:
@@ -74,6 +74,32 @@ def get_properties(
     """Récupère la liste des biens avec filtres"""
     query = db.query(Property).filter(Property.is_active == True)
     
+    # Cloisonnement société / agence / portefeuille. Une liste autorisée vide
+    # signifie explicitement qu'aucune donnée n'est accessible.
+    if filters.entity_id is not None:
+        query = query.filter(Property.entity_id == filters.entity_id)
+    if filters.agency_id is not None:
+        query = query.filter(Property.agency_id == filters.agency_id)
+    if filters.portfolio_id is not None:
+        query = query.filter(Property.portfolio_id == filters.portfolio_id)
+    if filters.allowed_scopes is not None:
+        scope_clauses = []
+        for scope in filters.allowed_scopes:
+            clauses = [Property.entity_id == scope.get("organization_id")]
+            if scope.get("agency_id") is not None:
+                clauses.append(Property.agency_id == scope["agency_id"])
+            if scope.get("portfolio_ids"):
+                clauses.append(Property.portfolio_id.in_(scope["portfolio_ids"]))
+            scope_clauses.append(and_(*clauses))
+        query = query.filter(or_(*scope_clauses)) if scope_clauses else query.filter(False)
+    else:
+        if filters.allowed_entity_ids is not None:
+            query = query.filter(Property.entity_id.in_(filters.allowed_entity_ids))
+        if filters.allowed_agency_ids is not None:
+            query = query.filter(or_(Property.agency_id.is_(None), Property.agency_id.in_(filters.allowed_agency_ids)))
+        if filters.allowed_portfolio_ids is not None:
+            query = query.filter(or_(Property.portfolio_id.is_(None), Property.portfolio_id.in_(filters.allowed_portfolio_ids)))
+
     # Recherche textuelle
     if filters.search:
         search_term = f"%{filters.search}%"

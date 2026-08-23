@@ -36,8 +36,11 @@ class PropertyCreate(BaseModel):
     postal_code: str
     city: str
     country: str = "France"
-    latitude: Optional[float] = None
-    longitude: Optional[float] = None
+    latitude: Optional[float] = Field(None, ge=-90, le=90)
+    longitude: Optional[float] = Field(None, ge=-180, le=180)
+    entity_id: Optional[int] = None
+    agency_id: Optional[int] = None
+    portfolio_id: Optional[int] = None
     
     # Caractéristiques
     living_area: Optional[float] = None
@@ -104,6 +107,11 @@ class PropertyResponse(BaseModel):
     heating_type: Optional[str] = None
     total_area: Optional[float] = None
     land_area: Optional[float] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    entity_id: Optional[int] = None
+    agency_id: Optional[int] = None
+    portfolio_id: Optional[int] = None
     created_at: Optional[datetime] = None
     
     class Config:
@@ -169,3 +177,10 @@ class PropertyFilter(BaseModel):
     min_rooms: Optional[int] = None
     tags: Optional[List[str]] = None
     available_from: Optional[date] = None
+    entity_id: Optional[int] = None
+    agency_id: Optional[int] = None
+    portfolio_id: Optional[int] = None
+    allowed_entity_ids: Optional[List[int]] = None
+    allowed_agency_ids: Optional[List[int]] = None
+    allowed_portfolio_ids: Optional[List[int]] = None
+    allowed_scopes: Optional[List[dict]] = None
