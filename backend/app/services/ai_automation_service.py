@@ -11,6 +11,7 @@ from __future__ import annotations
 import math
 import re
 import statistics
+import unicodedata
 import uuid
 from datetime import date, datetime, timedelta
 from types import SimpleNamespace
@@ -551,6 +552,561 @@ FAQS = [
     ({"rendez-vous", "rdv", "visite"}, "Je peux préparer une demande de rendez-vous. Indiquez la date, le motif et le bien concerné."),
 ]
 
+MANAGER_SUGGESTIONS = ["Rechercher un bien", "Voir les impayés", "Tickets en cours", "Baux qui arrivent à échéance"]
+TENANT_SUGGESTIONS = ["Consulter mes paiements", "Créer un ticket", "Prendre rendez-vous"]
+
+# Vocabulaire normalisé (sans accent) utilisé par le moteur d'intentions.
+_ENTITY_KEYWORDS = {
+    "property": {
+        "bien", "biens", "appartement", "appartements", "maison", "maisons",
+        "logement", "logements", "studio", "studios", "local", "locaux",
+        "immeuble", "immeubles", "propriete", "proprietes", "lot", "lots",
+    },
+    "tenant": {"locataire", "locataires", "preneur", "preneurs", "occupant", "occupants"},
+    "lease": {"bail", "baux", "contrat", "contrats", "location", "locations"},
+    "ticket": {
+        "ticket", "tickets", "intervention", "interventions", "incident",
+        "incidents", "reparation", "reparations", "sinistre", "sinistres",
+    },
+}
+_ENTITY_LABELS = {
+    "property": ("bien", "biens"),
+    "tenant": ("locataire", "locataires"),
+    "lease": ("bail", "baux"),
+    "ticket": ("ticket", "tickets"),
+}
+_SEARCH_VERBS = {
+    "recherche", "rechercher", "recherches", "cherche", "chercher", "trouve",
+    "trouver", "retrouver", "affiche", "afficher", "liste", "lister", "montre",
+    "montrer", "voir", "consulter", "ouvrir", "acceder", "recherche-moi", "search",
+}
+_GREETINGS = {"bonjour", "bonsoir", "salut", "hello", "hey", "coucou", "bjr", "hi"}
+_THANKS = {"merci", "thanks", "remercie"}
+_HELP_WORDS = {"aide", "aider", "help", "capacites", "fonctionnalites", "sais", "peux", "possibilites"}
+_UNPAID_WORDS = {"impaye", "impayes", "impayees", "retard", "retards", "relance", "relances", "arriere", "arrieres", "contentieux", "recouvrement"}
+_DUE_WORDS = {"echeance", "echeances", "expire", "expiration", "expirent", "renouvellement", "renouveler", "fin", "terme", "preavis"}
+_WORKFLOW_WORDS = {"workflow", "workflows", "automatisation", "automatisations", "automatiser", "declencher", "declenchement", "regle", "regles", "scenario", "scenarios", "rpa"}
+_APPOINTMENT_WORDS = {"rendez", "rdv", "visite", "visites", "planifier", "agenda", "creneau", "creneaux"}
+_CREATE_WORDS = {"creer", "cree", "nouveau", "nouvelle", "ouvrir", "declarer", "ajouter", "saisir", "enregistrer"}
+_PORTFOLIO_WORDS = {"portefeuille", "occupation", "vacance", "vacants", "vacant", "statistique", "statistiques", "kpi", "tableau", "bord", "synthese", "combien", "total", "resume"}
+_STATUS_WORDS = {"statut", "status", "etat", "avancement", "suivi", "ou", "encours", "cours", "ouverts", "ouvert", "en-cours"}
+
+# Mots ignorés lors de l'extraction du critère de recherche.
+_QUERY_STOPWORDS = (
+    {
+        "je", "tu", "il", "elle", "nous", "vous", "ils", "elles", "on", "me", "moi",
+        "mon", "ma", "mes", "le", "la", "les", "un", "une", "des", "du", "de", "d",
+        "au", "aux", "a", "et", "ou", "que", "qui", "quoi", "quel", "quelle",
+        "quels", "quelles", "pour", "par", "avec", "sans", "sur", "dans", "en",
+        "est", "sont", "ce", "cet", "cette", "ces", "se", "sa", "son", "ses",
+        "veux", "voudrais", "souhaite", "souhaiterais", "peux", "peut", "pouvez",
+        "merci", "svp", "stp", "plait", "bonjour", "bonsoir", "salut", "hello",
+        "aide", "aider", "moi", "the", "please", "tous", "toutes", "tout", "toute",
+        "liste", "detail", "details", "info", "infos", "information", "informations",
+        "fiche", "fiches", "dossier", "dossiers", "numero", "reference", "ref",
+    }
+    | _SEARCH_VERBS
+    | _CREATE_WORDS
+    | set().union(*_ENTITY_KEYWORDS.values())
+)
+
+
+def _strip_accents(value: str) -> str:
+    return "".join(
+        char for char in unicodedata.normalize("NFD", value)
+        if unicodedata.category(char) != "Mn"
+    )
+
+
+def _normalize_text(message: str) -> str:
+    return _strip_accents((message or "").casefold())
+
+
+def _normalize_words(message: str) -> set[str]:
+    """Tokens minuscules et sans accent : « Impayés » et « impaye » se valent."""
+    return set(re.findall(r"[a-z0-9]+", _normalize_text(message)))
+
+
+# Les mots-clés de la FAQ sont indexés sans accent pour rester comparables.
+_FAQ_INDEX = [
+    ({_strip_accents(keyword.casefold()) for keyword in keywords}, answer)
+    for keywords, answer in FAQS
+]
+
+
+def _enum_value(value) -> str:
+    return value.value if hasattr(value, "value") else str(value) if value is not None else ""
+
+
+def _bullets(lines: Iterable[str]) -> str:
+    return "\n".join(f"• {line}" for line in lines)
+
+
+def _detect_entities(words: set[str]) -> list[str]:
+    return [entity for entity, keywords in _ENTITY_KEYWORDS.items() if words & keywords]
+
+
+def _extract_search_terms(message: str) -> list[str]:
+    """Isole le critère utile d'une phrase (« le bail de Martin » -> Martin)."""
+    quoted = re.findall(r"[\"«']\s*([^\"»']{2,})\s*[\"»']", message or "")
+    if quoted:
+        return [item.strip() for item in quoted if item.strip()]
+    references = re.findall(r"\b[A-Za-z]{2,5}-[A-Za-z0-9]{3,}\b", message or "")
+    if references:
+        return references
+    terms = []
+    for token in re.findall(r"[\w@.\-]{2,}", message or "", flags=re.UNICODE):
+        normalized = _strip_accents(token.casefold())
+        if normalized in _QUERY_STOPWORDS or normalized in _STATUS_WORDS:
+            continue
+        if len(normalized) < 3 and not normalized.isdigit():
+            continue
+        terms.append(token)
+    return terms
+
+
+def _search_entities(db: Session, terms: list[str], entity_types: list[str], limit: int = 5) -> list[dict]:
+    """Recherche la phrase complète puis, à défaut, chaque terme isolément."""
+    found: list[dict] = []
+    seen: set[tuple] = set()
+    candidates = []
+    if terms:
+        joined = " ".join(terms)
+        candidates.append(joined)
+        candidates.extend(term for term in terms if term != joined)
+    for candidate in candidates:
+        if len(candidate) < 2:
+            continue
+        for row in manager_search(db, candidate, entity_types, limit):
+            key = (row["type"], row["id"])
+            if key not in seen:
+                seen.add(key)
+                found.append(row)
+        if len(found) >= limit:
+            break
+    return found[:limit]
+
+
+def _recent_entities(db: Session, entity: str, limit: int = 5) -> list[dict]:
+    if entity == "property":
+        rows = db.query(Property).filter(Property.is_active == True).order_by(Property.id.desc()).limit(limit).all()  # noqa: E712
+        return [{"type": "property", "id": row.id, "reference": row.reference, "label": row.title, "detail": f"{row.city} · {_enum_value(row.status)}"} for row in rows]
+    if entity == "tenant":
+        rows = db.query(Tenant).order_by(Tenant.id.desc()).limit(limit).all()
+        return [{"type": "tenant", "id": row.id, "reference": row.reference, "label": f"{row.first_name} {row.last_name}", "detail": row.email} for row in rows]
+    if entity == "lease":
+        rows = db.query(Lease).order_by(Lease.id.desc()).limit(limit).all()
+        output = []
+        for row in rows:
+            tenant_label = f"{row.tenant.first_name} {row.tenant.last_name}" if row.tenant else f"locataire #{row.tenant_id}"
+            property_label = row.property.title if row.property else f"bien #{row.property_id}"
+            output.append({
+                "type": "lease", "id": row.id, "reference": row.reference,
+                "label": f"{tenant_label} — {property_label}",
+                "detail": f"{row.monthly_rent:.2f} EUR · {_enum_value(row.status)}",
+            })
+        return output
+    rows = db.query(MaintenanceTicket).order_by(MaintenanceTicket.id.desc()).limit(limit).all()
+    return [{"type": "ticket", "id": row.id, "reference": row.reference, "label": row.title, "detail": f"{_enum_value(row.status)} · urgence {_enum_value(row.urgency)}"} for row in rows]
+
+
+def _format_results(rows: list[dict]) -> str:
+    return _bullets(f"{row['reference']} — {row['label']} ({row['detail']})" for row in rows)
+
+
+def _reply(intent: str, confidence: float, answer: str, suggestions: list[str], action: Optional[dict] = None, results: Optional[list[dict]] = None) -> dict:
+    return {
+        "intent": intent,
+        "confidence": confidence,
+        "answer": answer,
+        "suggestions": suggestions,
+        "action": action,
+        "results": results or [],
+    }
+
+
+# ---------------------------------------------------------------------------
+# Intentions gestionnaire
+# ---------------------------------------------------------------------------
+def _manager_search(db: Session, message: str, words: set[str]) -> dict:
+    entities = _detect_entities(words)
+    terms = _extract_search_terms(message)
+    targets = entities or ["property", "tenant", "lease", "ticket"]
+    singular, plural = _ENTITY_LABELS[entities[0]] if len(entities) == 1 else ("résultat", "résultats")
+    rows = _search_entities(db, terms, targets) if terms else []
+
+    if rows:
+        criterion = " ".join(terms)
+        header = f"{len(rows)} {plural if len(rows) > 1 else singular} correspondent à « {criterion} » :" if len(rows) > 1 else f"1 {singular} correspond à « {criterion} » :"
+        return _reply("search_results", 0.9, f"{header}\n{_format_results(rows)}", MANAGER_SUGGESTIONS, results=rows)
+
+    if len(entities) == 1:
+        entity = entities[0]
+        recent = _recent_entities(db, entity)
+        if terms:
+            intro = f"Aucun {singular} ne correspond à « {' '.join(terms)} »."
+        else:
+            intro = f"Sur quel {singular} voulez-vous travailler ? Donnez une référence, un nom, une ville ou un mot du titre."
+        if recent:
+            body = f"\nDerniers {plural} enregistrés :\n{_format_results(recent)}"
+        else:
+            body = f"\nAucun {singular} n'est encore enregistré."
+        return _reply(
+            "search_prompt", 0.75, intro + body, MANAGER_SUGGESTIONS,
+            action={"type": "search", "requires_confirmation": False, "entity_types": [entity], "required_fields": ["query"]},
+            results=recent,
+        )
+
+    counts = {
+        "biens": db.query(func.count(Property.id)).filter(Property.is_active == True).scalar() or 0,  # noqa: E712
+        "locataires": db.query(func.count(Tenant.id)).scalar() or 0,
+        "baux": db.query(func.count(Lease.id)).scalar() or 0,
+        "tickets": db.query(func.count(MaintenanceTicket.id)).scalar() or 0,
+    }
+    inventory = ", ".join(f"{value} {key}" for key, value in counts.items())
+    answer = (
+        "Précisez ce que je dois chercher : un bien, un locataire, un bail ou un ticket, "
+        f"puis un critère (référence, nom, ville, mot-clé).\nBase actuelle : {inventory}.\n"
+        "Exemples : « bail de Martin », « bien à Paris », « ticket TKT-12AB34 »."
+    )
+    return _reply(
+        "search_prompt", 0.7, answer,
+        ["Rechercher un bien", "Rechercher un locataire", "Rechercher un bail", "Rechercher un ticket"],
+        action={"type": "search", "requires_confirmation": False, "entity_types": list(_ENTITY_LABELS), "required_fields": ["query"]},
+    )
+
+
+def _manager_unpaid(db: Session, message: str, words: set[str]) -> dict:
+    rows = db.query(LatePayment).filter(LatePayment.status != "resolved").order_by(LatePayment.overdue_days.desc()).limit(5).all()
+    total = db.query(func.coalesce(func.sum(LatePayment.amount_outstanding), 0.0)).filter(LatePayment.status != "resolved").scalar() or 0.0
+    count = db.query(func.count(LatePayment.id)).filter(LatePayment.status != "resolved").scalar() or 0
+    if not count:
+        return _reply("manager_unpaid", 0.9, "Aucun impayé ouvert n'est enregistré à ce jour.", MANAGER_SUGGESTIONS)
+    details = _bullets(
+        f"{row.reference} — période {row.period}, {row.amount_outstanding:.2f} EUR, {row.overdue_days} j de retard, étape {_enum_value(row.stage)}"
+        for row in rows
+    )
+    answer = f"{count} impayé(s) ouvert(s) pour {total:.2f} EUR au total.\nLes plus anciens :\n{details}"
+    return _reply(
+        "manager_unpaid", 0.92, answer,
+        ["Lancer une relance", "Voir les baux concernés", "Tickets en cours"],
+        results=[{"type": "late_payment", "id": row.id, "reference": row.reference, "label": row.period, "detail": f"{row.amount_outstanding:.2f} EUR"} for row in rows],
+    )
+
+
+def _manager_tickets(db: Session, message: str, words: set[str]) -> dict:
+    terms = _extract_search_terms(message)
+    rows = _search_entities(db, terms, ["ticket"]) if terms else []
+    if rows:
+        return _reply("search_results", 0.9, f"Tickets correspondants :\n{_format_results(rows)}", MANAGER_SUGGESTIONS, results=rows)
+    open_statuses = [status for status in TicketStatus if status not in (TicketStatus.CLOSED, TicketStatus.CANCELLED)]
+    open_query = db.query(MaintenanceTicket).filter(MaintenanceTicket.status.in_(open_statuses))
+    count = open_query.count()
+    if not count:
+        return _reply("manager_tickets", 0.88, "Aucun ticket ouvert : toutes les demandes sont clôturées ou annulées.", MANAGER_SUGGESTIONS)
+    latest = open_query.order_by(MaintenanceTicket.reported_at.desc()).limit(5).all()
+    escalated = open_query.filter(MaintenanceTicket.escalated == True).count()  # noqa: E712
+    details = _bullets(
+        f"{row.reference} — {row.title} · {_enum_value(row.status)} · urgence {_enum_value(row.urgency)}"
+        for row in latest
+    )
+    answer = f"{count} ticket(s) ouvert(s), dont {escalated} en escalade SLA.\nLes plus récents :\n{details}"
+    return _reply(
+        "manager_tickets", 0.9, answer,
+        ["Créer un ticket", "Voir les impayés", "Rechercher un bien"],
+        results=[{"type": "ticket", "id": row.id, "reference": row.reference, "label": row.title, "detail": _enum_value(row.status)} for row in latest],
+    )
+
+
+def _manager_lease_deadlines(db: Session, message: str, words: set[str]) -> dict:
+    today = date.today()
+    horizon = today + timedelta(days=90)
+    rows = db.query(Lease).filter(
+        Lease.status == LeaseStatus.ACTIVE,
+        Lease.end_date.isnot(None),
+        Lease.end_date <= horizon,
+    ).order_by(Lease.end_date).limit(5).all()
+    if not rows:
+        return _reply(
+            "manager_lease_deadlines", 0.85,
+            "Aucun bail actif n'arrive à échéance dans les 90 prochains jours.",
+            MANAGER_SUGGESTIONS,
+        )
+    details = _bullets(
+        f"{row.reference} — fin le {row.end_date.isoformat()} ({(row.end_date - today).days} j) · bien #{row.property_id} · locataire #{row.tenant_id}"
+        for row in rows
+    )
+    return _reply(
+        "manager_lease_deadlines", 0.9,
+        f"{len(rows)} bail/baux arrivent à échéance sous 90 jours :\n{details}\nPréparez un renouvellement, un avenant ou un congé selon le cas.",
+        ["Rechercher un bail", "Voir les impayés", "Tickets en cours"],
+        results=[{"type": "lease", "id": row.id, "reference": row.reference, "label": row.end_date.isoformat(), "detail": f"bien #{row.property_id}"} for row in rows],
+    )
+
+
+def _manager_portfolio(db: Session, message: str, words: set[str]) -> dict:
+    rows = db.query(Property.status, func.count(Property.id)).filter(Property.is_active == True).group_by(Property.status).all()  # noqa: E712
+    total = sum(count for _, count in rows)
+    if not total:
+        return _reply("manager_portfolio", 0.8, "Aucun bien actif n'est enregistré pour le moment.", MANAGER_SUGGESTIONS)
+    breakdown = {_enum_value(status): count for status, count in rows}
+    # L'occupation est mesurée sur les baux actifs : le statut du bien peut ne
+    # pas avoir été mis à jour et donnerait un taux faux.
+    occupied = (
+        db.query(func.count(func.distinct(Lease.property_id)))
+        .filter(Lease.status == LeaseStatus.ACTIVE)
+        .scalar()
+        or 0
+    )
+    active_leases = db.query(func.count(Lease.id)).filter(Lease.status == LeaseStatus.ACTIVE).scalar() or 0
+    occupancy = round(occupied / total * 100, 1) if total else 0.0
+    answer = (
+        f"Portefeuille : {total} bien(s) actif(s), {active_leases} bail/baux actif(s), "
+        f"{occupied} bien(s) occupé(s) soit un taux d'occupation de {occupancy} %.\n"
+        + _bullets(f"statut « {label} » : {count}" for label, count in sorted(breakdown.items()))
+    )
+    return _reply("manager_portfolio", 0.88, answer, MANAGER_SUGGESTIONS)
+
+
+def _manager_workflow(db: Session, message: str, words: set[str]) -> dict:
+    workflows = db.query(AutomationWorkflow).filter(AutomationWorkflow.is_active == True).order_by(AutomationWorkflow.priority, AutomationWorkflow.id).limit(8).all()  # noqa: E712
+    normalized = _normalize_text(message)
+    matched = next(
+        (item for item in workflows if _strip_accents(item.name.casefold()) in normalized or _strip_accents(item.event_type.casefold()) in normalized),
+        None,
+    )
+    catalogue = [{"id": item.id, "name": item.name, "event_type": item.event_type} for item in workflows]
+    if matched:
+        answer = (
+            f"Workflow « {matched.name} » identifié (événement {matched.event_type}). "
+            "Confirmez le déclenchement et fournissez la charge utile de l'événement ; rien n'est exécuté sans votre validation."
+        )
+        action = {
+            "type": "trigger_workflow",
+            "requires_confirmation": True,
+            "required_fields": ["event_type", "payload"],
+            "parameters": {"event_type": matched.event_type, "workflow_id": matched.id},
+            "available": catalogue,
+        }
+        return _reply("manager_workflow", 0.92, answer, ["Confirmer le déclenchement", "Tester en dry-run", "Voir les exécutions"], action=action)
+    if not workflows:
+        return _reply(
+            "manager_workflow", 0.8,
+            "Aucun workflow actif n'est configuré. Créez d'abord une règle (événement, conditions, actions) dans Automatisation.",
+            ["Voir le catalogue d'actions", "Rechercher un bien", "Tickets en cours"],
+        )
+    answer = (
+        "Workflows actifs disponibles :\n"
+        + _bullets(f"{item['name']} — événement {item['event_type']}" for item in catalogue)
+        + "\nIndiquez le workflow à déclencher ; l'exécution reste soumise à confirmation."
+    )
+    action = {
+        "type": "trigger_workflow",
+        "requires_confirmation": True,
+        "required_fields": ["event_type", "payload"],
+        "available": catalogue,
+    }
+    return _reply("manager_workflow", 0.85, answer, ["Tester en dry-run", "Voir les exécutions", "Créer un ticket"], action=action)
+
+
+def _manager_create_ticket(db: Session, message: str, words: set[str]) -> dict:
+    answer = (
+        "Je peux préparer un ticket de maintenance. Indiquez le bien, un titre, la description, "
+        "la catégorie et l'urgence ; la création sera soumise à confirmation."
+    )
+    action = {
+        "type": "create_ticket",
+        "requires_confirmation": True,
+        "required_fields": ["property_id", "title", "description", "category", "urgency"],
+    }
+    return _reply("manager_create_ticket", 0.88, answer, ["Rechercher un bien", "Tickets en cours", "Voir les impayés"], action=action)
+
+
+def _manager_appointment(db: Session, message: str, words: set[str]) -> dict:
+    answer = (
+        "Je peux préparer un rendez-vous (visite, état des lieux, diagnostic). "
+        "Indiquez la date et l'heure, la durée, le motif et le bien concerné."
+    )
+    action = {
+        "type": "create_appointment",
+        "requires_confirmation": True,
+        "required_fields": ["starts_at", "purpose"],
+        "optional_fields": ["property_id", "duration_minutes", "contact_email", "contact_phone"],
+    }
+    return _reply("manager_appointment", 0.87, answer, ["Rechercher un bien", "Voir l'agenda", "Créer un ticket"], action=action)
+
+
+def _manager_help(db: Session, message: str, words: set[str], greeting: bool = False) -> dict:
+    opening = "Bonjour ! Je suis l'assistant de gestion. " if greeting else ""
+    answer = (
+        opening
+        + "Voici ce que je sais faire :\n"
+        + _bullets([
+            "rechercher un bien, un locataire, un bail ou un ticket (« bail de Martin », « bien à Paris »)",
+            "faire le point sur les impayés et les relances",
+            "lister les tickets ouverts et les escalades SLA",
+            "signaler les baux qui arrivent à échéance",
+            "donner les indicateurs du portefeuille (occupation, statuts)",
+            "préparer un ticket, un rendez-vous ou le déclenchement d'un workflow, toujours soumis à confirmation",
+        ])
+        + "\nPosez votre question en langage naturel."
+    )
+    return _reply("manager_help", 0.8 if greeting else 0.75, answer, MANAGER_SUGGESTIONS)
+
+
+def _manager_fallback(db: Session, message: str, words: set[str]) -> dict:
+    terms = _extract_search_terms(message)
+    rows = _search_entities(db, terms, ["property", "tenant", "lease", "ticket"], limit=5) if terms else []
+    if rows:
+        answer = (
+            "Je ne suis pas certain de l'intention, mais voici ce qui correspond à votre message :\n"
+            + _format_results(rows)
+        )
+        return _reply("search_results", 0.6, answer, MANAGER_SUGGESTIONS, results=rows)
+    answer = (
+        "Je n'ai pas compris la demande. Reformulez avec un verbe et un objet, par exemple :\n"
+        + _bullets([
+            "« recherche le bail BAI-1234 »",
+            "« quels sont les impayés en cours ? »",
+            "« tickets ouverts sur le bien de Lyon »",
+            "« quels baux arrivent à échéance ? »",
+            "« déclencher le workflow relance »",
+        ])
+    )
+    return _reply("fallback", 0.35, answer, MANAGER_SUGGESTIONS)
+
+
+# ---------------------------------------------------------------------------
+# Intentions locataire
+# ---------------------------------------------------------------------------
+def _tenant_ticket(db: Session, session: ChatSession, message: str, words: set[str]) -> dict:
+    tickets = db.query(MaintenanceTicket).filter(MaintenanceTicket.tenant_id == session.tenant_id).order_by(MaintenanceTicket.created_at.desc()).limit(3).all()
+    wants_status = bool(words & _STATUS_WORDS) or bool(words & {"mon", "mes"} and not words & _CREATE_WORDS)
+    if wants_status and tickets:
+        latest = tickets[0]
+        answer = f"Votre dernière demande {latest.reference} est au statut « {_enum_value(latest.status)} » : {latest.title}."
+        if len(tickets) > 1:
+            answer += "\nAutres demandes :\n" + _bullets(f"{row.reference} — {row.title} · {_enum_value(row.status)}" for row in tickets[1:])
+        return _reply("maintenance_ticket", 0.9, answer, TENANT_SUGGESTIONS)
+    answer = "Je peux préparer un ticket. Précisez le bien, le problème, la pièce et le niveau d'urgence ; la création devra être confirmée."
+    action = {"type": "create_ticket", "requires_confirmation": True, "required_fields": ["property_id", "title", "description", "urgency"]}
+    return _reply("maintenance_ticket", 0.88, answer, TENANT_SUGGESTIONS, action=action)
+
+
+def _tenant_payment(db: Session, session: ChatSession, message: str, words: set[str]) -> dict:
+    payment = db.query(RentPayment).filter(RentPayment.tenant_id == session.tenant_id).order_by(RentPayment.due_date.desc()).first()
+    if not payment:
+        return _reply("payment_status", 0.85, "Aucune échéance n'est encore enregistrée dans votre dossier.", TENANT_SUGGESTIONS)
+    remaining = max(0, (payment.amount_due or 0) - (payment.amount_paid or 0))
+    answer = f"L'échéance {payment.period} est au statut « {_enum_value(payment.status)} ». Solde restant : {remaining:.2f} EUR."
+    return _reply("payment_status", 0.92, answer, TENANT_SUGGESTIONS)
+
+
+def _tenant_lease(db: Session, session: ChatSession, message: str, words: set[str]) -> dict:
+    lease = db.query(Lease).filter(Lease.tenant_id == session.tenant_id).order_by(Lease.start_date.desc()).first()
+    if not lease:
+        return _reply("lease_information", 0.7, "Aucun bail n'est rattaché à votre dossier pour le moment.", TENANT_SUGGESTIONS)
+    end = lease.end_date.isoformat() if lease.end_date else "sans terme fixé"
+    answer = (
+        f"Votre bail {lease.reference} est « {_enum_value(lease.status)} » depuis le {lease.start_date.isoformat()} (fin : {end}). "
+        f"Loyer {lease.monthly_rent:.2f} EUR + {(lease.monthly_charges or 0):.2f} EUR de charges, paiement le {lease.payment_day} du mois."
+    )
+    return _reply("lease_information", 0.9, answer, TENANT_SUGGESTIONS)
+
+
+def _tenant_appointment(db: Session, session: ChatSession, message: str, words: set[str]) -> dict:
+    answer = "Je peux préparer une demande de rendez-vous. Indiquez la date, l'heure, le motif et le bien concerné ; la demande sera soumise à validation."
+    action = {"type": "create_appointment", "requires_confirmation": True, "required_fields": ["starts_at", "purpose"]}
+    return _reply("appointment_request", 0.88, answer, TENANT_SUGGESTIONS, action=action)
+
+
+def _tenant_help(db: Session, session: ChatSession, message: str, words: set[str], greeting: bool = False) -> dict:
+    opening = "Bonjour ! " if greeting else ""
+    answer = (
+        opening
+        + "Je suis disponible 24h/24 pour :\n"
+        + _bullets([
+            "suivre vos échéances et paiements",
+            "consulter votre bail et vos quittances",
+            "créer ou suivre une demande d'intervention",
+            "demander un rendez-vous",
+        ])
+        + "\nQue souhaitez-vous faire ?"
+    )
+    return _reply("tenant_help", 0.8 if greeting else 0.75, answer, TENANT_SUGGESTIONS)
+
+
+def _faq_reply(words: set[str], suggestions: list[str]) -> Optional[dict]:
+    best = None
+    for keywords, response in _FAQ_INDEX:
+        overlap = len(words & keywords)
+        if overlap and (best is None or overlap > best[0]):
+            best = (overlap, response)
+    if not best:
+        return None
+    return _reply("faq", min(0.95, 0.65 + best[0] * 0.12), best[1], suggestions)
+
+
+def _resolve_manager_intent(db: Session, message: str, words: set[str]) -> dict:
+    entities = _detect_entities(words)
+    has_search_verb = bool(words & _SEARCH_VERBS)
+    wants_create = bool(words & _CREATE_WORDS)
+
+    if words & _UNPAID_WORDS:
+        return _manager_unpaid(db, message, words)
+    if words & _WORKFLOW_WORDS:
+        return _manager_workflow(db, message, words)
+    if "ticket" in entities and wants_create:
+        return _manager_create_ticket(db, message, words)
+    if words & _APPOINTMENT_WORDS or "rendez-vous" in _normalize_text(message):
+        return _manager_appointment(db, message, words)
+    if "lease" in entities and words & _DUE_WORDS:
+        return _manager_lease_deadlines(db, message, words)
+    if words & _DUE_WORDS and words & {"bail", "baux"}:
+        return _manager_lease_deadlines(db, message, words)
+    if "ticket" in entities:
+        return _manager_tickets(db, message, words)
+    if entities or has_search_verb:
+        return _manager_search(db, message, words)
+    if words & _PORTFOLIO_WORDS:
+        return _manager_portfolio(db, message, words)
+    if words & _GREETINGS:
+        return _manager_help(db, message, words, greeting=True)
+    if words & _THANKS:
+        return _reply("smalltalk", 0.7, "Avec plaisir. Autre chose ? Je peux chercher un dossier, faire le point sur les impayés ou préparer une action.", MANAGER_SUGGESTIONS)
+    if words & _HELP_WORDS:
+        return _manager_help(db, message, words)
+    faq = _faq_reply(words, MANAGER_SUGGESTIONS)
+    if faq:
+        return faq
+    return _manager_fallback(db, message, words)
+
+
+def _resolve_tenant_intent(db: Session, session: ChatSession, message: str, words: set[str]) -> dict:
+    if words & {"ticket", "tickets", "intervention", "interventions", "reparation", "reparations", "panne", "fuite", "probleme", "demande", "demandes"}:
+        return _tenant_ticket(db, session, message, words)
+    if words & {"impaye", "impayes", "echeance", "echeances", "paiement", "paiements", "payer", "solde", "regler", "dette"}:
+        return _tenant_payment(db, session, message, words)
+    if words & {"bail", "contrat", "location", "preavis", "conge"} and not words & {"quittance"}:
+        return _tenant_lease(db, session, message, words)
+    if words & _APPOINTMENT_WORDS:
+        return _tenant_appointment(db, session, message, words)
+    faq = _faq_reply(words, TENANT_SUGGESTIONS)
+    if faq:
+        return faq
+    if words & _GREETINGS:
+        return _tenant_help(db, session, message, words, greeting=True)
+    if words & _THANKS:
+        return _reply("smalltalk", 0.7, "Avec plaisir. Je reste disponible pour vos paiements, votre bail ou une demande d'intervention.", TENANT_SUGGESTIONS)
+    if words & _HELP_WORDS:
+        return _tenant_help(db, session, message, words)
+    return _reply(
+        "fallback", 0.35,
+        "Je n'ai pas compris votre demande. Vous pouvez me demander par exemple « où en est mon ticket ? », "
+        "« quel est mon solde ? », « détails de mon bail » ou « prendre rendez-vous ».",
+        TENANT_SUGGESTIONS,
+    )
+
 
 def create_chat_session(db: Session, actor_type: str, actor_id: int, locale: str, context: dict) -> ChatSession:
     row = ChatSession(
@@ -592,56 +1148,32 @@ def get_chat_session(db: Session, session_identifier: str, actor_type: str, acto
     return row
 
 
-def _normalize_words(message: str) -> set[str]:
-    return set(re.findall(r"[a-zà-ÿ0-9]+", (message or "").casefold()))
-
-
 def answer_chat(db: Session, session: ChatSession, message: str, context: dict) -> dict:
+    """Route le message vers l'intention la plus probable puis interroge les données.
+
+    Chaque réponse est construite à partir du portefeuille réel : le message
+    générique de présentation n'est plus utilisé que lorsque l'utilisateur
+    demande explicitement de l'aide.
+    """
     db.add(ChatMessage(session_id=session.id, role="user", content=message, metadata_json=context))
     words = _normalize_words(message)
-    intent, confidence = "fallback", 0.35
-    suggestions = ["Consulter mes paiements", "Créer un ticket", "Prendre rendez-vous"]
-    action = None
-    answer = "Je n'ai pas assez d'informations pour répondre avec certitude. Reformulez votre demande ou contactez votre gestionnaire."
 
-    if session.actor_type == "tenant" and words & {"ticket", "demande", "intervention", "réparation", "reparation"}:
-        intent, confidence = "maintenance_ticket", 0.88
-        tickets = db.query(MaintenanceTicket).filter(MaintenanceTicket.tenant_id == session.tenant_id).order_by(MaintenanceTicket.created_at.desc()).limit(3).all()
-        if words & {"suivi", "statut", "où", "avancement"} and tickets:
-            latest = tickets[0]
-            status = latest.status.value if hasattr(latest.status, "value") else latest.status
-            answer = f"Votre dernière demande {latest.reference} est au statut « {status} » : {latest.title}."
-        else:
-            answer = "Je peux préparer un ticket. Précisez le bien, le problème, la pièce et le niveau d'urgence ; la création devra être confirmée."
-            action = {"type": "create_ticket", "requires_confirmation": True, "required_fields": ["property_id", "title", "description", "urgency"]}
-    elif session.actor_type == "tenant" and words & {"impayé", "impaye", "échéance", "echeance", "paiement", "payer"}:
-        intent, confidence = "payment_status", 0.92
-        payment = db.query(RentPayment).filter(RentPayment.tenant_id == session.tenant_id).order_by(RentPayment.due_date.desc()).first()
-        if payment:
-            remaining = max(0, (payment.amount_due or 0) - (payment.amount_paid or 0))
-            answer = f"L'échéance {payment.period} est au statut « {payment.status.value} ». Solde restant : {remaining:.2f} EUR."
-        else:
-            answer = "Aucune échéance n'est encore enregistrée dans votre dossier."
+    if session.actor_type == "manager":
+        outcome = _resolve_manager_intent(db, message, words)
     else:
-        best = None
-        for keywords, response in FAQS:
-            overlap = len(words & keywords)
-            if overlap and (best is None or overlap > best[0]):
-                best = (overlap, response)
-        if best:
-            intent, confidence, answer = "faq", min(0.95, 0.65 + best[0] * 0.12), best[1]
-        elif session.actor_type == "manager":
-            intent, confidence = "manager_help", 0.60
-            answer = "Je peux rechercher un bien, un locataire, un bail ou un ticket, et préparer une action rapide soumise à confirmation."
-            suggestions = ["Rechercher", "Créer un ticket", "Déclencher un workflow"]
+        outcome = _resolve_tenant_intent(db, session, message, words)
 
     assistant = ChatMessage(
         session_id=session.id,
         role="assistant",
-        content=answer,
-        intent=intent,
-        confidence=confidence,
-        metadata_json={"suggestions": suggestions, "action": action},
+        content=outcome["answer"],
+        intent=outcome["intent"],
+        confidence=outcome["confidence"],
+        metadata_json={
+            "suggestions": outcome["suggestions"],
+            "action": outcome["action"],
+            "results": outcome["results"],
+        },
     )
     db.add(assistant)
     session.last_activity_at = utcnow()
@@ -649,11 +1181,12 @@ def answer_chat(db: Session, session: ChatSession, message: str, context: dict) 
     db.refresh(assistant)
     return {
         "message_id": assistant.id,
-        "answer": answer,
-        "intent": intent,
-        "confidence": confidence,
-        "suggestions": suggestions,
-        "proposed_action": action,
+        "answer": outcome["answer"],
+        "intent": outcome["intent"],
+        "confidence": outcome["confidence"],
+        "suggestions": outcome["suggestions"],
+        "proposed_action": outcome["action"],
+        "results": outcome["results"],
         "available_24_7": True,
         "automated_response": True,
     }
@@ -692,8 +1225,34 @@ def manager_search(db: Session, query: str, entity_types: list[str], limit: int)
         rows = db.query(Tenant).filter(or_(Tenant.reference.ilike(needle), Tenant.first_name.ilike(needle), Tenant.last_name.ilike(needle), Tenant.email.ilike(needle))).limit(limit).all()
         results.extend({"type": "tenant", "id": row.id, "reference": row.reference, "label": f"{row.first_name} {row.last_name}", "detail": row.email} for row in rows)
     if "lease" in entity_types:
-        rows = db.query(Lease).filter(Lease.reference.ilike(needle)).limit(limit).all()
-        results.extend({"type": "lease", "id": row.id, "reference": row.reference, "label": row.reference, "detail": f"Bien {row.property_id} · Locataire {row.tenant_id}"} for row in rows)
+        # Un bail est le plus souvent cherché par le nom du locataire ou par le
+        # bien concerné, pas seulement par sa référence interne.
+        rows = (
+            db.query(Lease)
+            .outerjoin(Tenant, Tenant.id == Lease.tenant_id)
+            .outerjoin(Property, Property.id == Lease.property_id)
+            .filter(or_(
+                Lease.reference.ilike(needle),
+                Tenant.reference.ilike(needle),
+                Tenant.first_name.ilike(needle),
+                Tenant.last_name.ilike(needle),
+                Tenant.email.ilike(needle),
+                Property.reference.ilike(needle),
+                Property.title.ilike(needle),
+                Property.city.ilike(needle),
+                Property.address.ilike(needle),
+            ))
+            .limit(limit)
+            .all()
+        )
+        for row in rows:
+            tenant_label = f"{row.tenant.first_name} {row.tenant.last_name}" if row.tenant else f"locataire #{row.tenant_id}"
+            property_label = row.property.title if row.property else f"bien #{row.property_id}"
+            results.append({
+                "type": "lease", "id": row.id, "reference": row.reference,
+                "label": f"{tenant_label} — {property_label}",
+                "detail": f"{row.monthly_rent:.2f} EUR · {row.status.value if hasattr(row.status, 'value') else row.status}",
+            })
     if "ticket" in entity_types:
         rows = db.query(MaintenanceTicket).filter(or_(MaintenanceTicket.reference.ilike(needle), MaintenanceTicket.title.ilike(needle), MaintenanceTicket.description.ilike(needle))).limit(limit).all()
         results.extend({"type": "ticket", "id": row.id, "reference": row.reference, "label": row.title, "detail": row.status.value} for row in rows)
