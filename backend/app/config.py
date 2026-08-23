@@ -1,5 +1,6 @@
 import logging
 import os
+import urllib.parse
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -8,6 +9,59 @@ from dotenv import load_dotenv
 # override=False : une variable déjà positionnée par l'hôte ou Docker l'emporte.
 _ENV_FILE = Path(__file__).resolve().parent.parent / ".env"
 load_dotenv(_ENV_FILE)
+
+# Hôtes qui n'existent que dans le réseau docker-compose (noms de services).
+# Ils ne sont résolubles qu'à l'intérieur des conteneurs, jamais sur la machine hôte.
+COMPOSE_ONLY_HOSTS = {"postgres", "db"}
+
+
+def running_inside_docker() -> bool:
+    """Vrai quand le processus s'exécute dans un conteneur Docker/K8s."""
+    return Path("/.dockerenv").exists() or bool(os.getenv("KUBERNETES_SERVICE_HOST"))
+
+
+def normalize_database_url(url: str, *, in_docker: bool | None = None) -> str:
+    """Réécrit l'hôte compose-only de DATABASE_URL quand l'API tourne hors Docker.
+
+    ``postgres`` est le nom du service docker-compose : il n'est résoluble que
+    à l'intérieur du réseau Docker. Lancer ``uvicorn`` directement sur la
+    machine hôte avec une telle URL fait échouer le démarrage avec :
+    « could not translate host name "postgres" to address: Temporary failure
+    in name resolution ». Le docker-compose publiant le port 5432 du conteneur
+    sur l'hôte, la substitution par ``localhost`` rend le démarrage local
+    fonctionnel sans modifier le ``.env`` partagé avec Docker.
+    """
+    if in_docker is None:
+        in_docker = running_inside_docker()
+    if in_docker or not url:
+        return url
+    try:
+        parts = urllib.parse.urlsplit(url)
+        host = parts.hostname or ""
+    except ValueError:
+        return url
+    if host.lower() not in COMPOSE_ONLY_HOSTS:
+        return url
+
+    netloc = parts.netloc
+    userinfo, sep, hostport = netloc.rpartition("@")
+    if not sep:
+        userinfo, hostport = "", netloc
+    # Remplace uniquement l'hôte, en conservant identifiants et port.
+    if hostport.lower().startswith(host.lower()):
+        hostport = "localhost" + hostport[len(host):]
+    netloc = f"{userinfo}@{hostport}" if userinfo else hostport
+    normalized = urllib.parse.urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
+
+    shown = f"{parts.scheme}://localhost" + (f":{parts.port}" if parts.port else "") + parts.path
+    logging.getLogger(__name__).warning(
+        "DATABASE_URL cible l'hôte Docker « %s » mais l'API tourne hors Docker ; "
+        "l'hôte a été remappé vers localhost (%s). Vérifiez que le conteneur "
+        "postgres est démarré : docker compose up -d postgres",
+        host,
+        shown,
+    )
+    return normalized
 
 
 def parse_bool(raw: str | None, default: bool = False) -> bool:
@@ -58,9 +112,11 @@ class Settings:
     MAX_UPLOAD_SIZE = parse_int(os.getenv("MAX_UPLOAD_SIZE"), 5_242_880)
     LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
     LOG_FILE = os.getenv("LOG_FILE", "logs/app.log")
-    DATABASE_URL = os.getenv(
-        "DATABASE_URL",
-        "postgresql://immo_user:immo_password_2024@localhost:5432/immo_db",
+    DATABASE_URL = normalize_database_url(
+        os.getenv(
+            "DATABASE_URL",
+            "postgresql://immo_user:immo_password_2024@localhost:5432/immo_db",
+        )
     )
     DEBUG = parse_bool(os.getenv("DEBUG"), True)
     AUTO_CREATE_TABLES = parse_bool(os.getenv("AUTO_CREATE_TABLES"), True)

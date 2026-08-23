@@ -8,7 +8,14 @@ TEST_DIR = tempfile.mkdtemp(prefix="gestimmo-config-")
 os.environ.setdefault("DATABASE_URL", f"sqlite:///{TEST_DIR}/tests.db")
 os.environ.setdefault("DEBUG", "false")
 
-from app.config import parse_bool, parse_csv_list, parse_float, parse_int, settings  # noqa: E402
+from app.config import (  # noqa: E402
+    normalize_database_url,
+    parse_bool,
+    parse_csv_list,
+    parse_float,
+    parse_int,
+    settings,
+)
 from app.middleware.rate_limit import RateLimiter  # noqa: E402
 
 
@@ -45,6 +52,33 @@ class EnvParsingTest(unittest.TestCase):
         self.assertTrue(settings.ALLOWED_ORIGINS)
         self.assertTrue(settings.LOG_LEVEL)
         self.assertIn("jpg", settings.ALLOWED_EXTENSIONS)
+
+
+class DatabaseUrlNormalizationTest(unittest.TestCase):
+    """Hors Docker, l'hôte compose-only « postgres » doit devenir localhost."""
+
+    COMPOSE_URL = "postgresql://immo_user:immo_password_2024@postgres:5432/immo_db"
+
+    def test_compose_host_remapped_to_localhost_outside_docker(self):
+        self.assertEqual(
+            normalize_database_url(self.COMPOSE_URL, in_docker=False),
+            "postgresql://immo_user:immo_password_2024@localhost:5432/immo_db",
+        )
+
+    def test_compose_host_preserved_inside_docker(self):
+        self.assertEqual(
+            normalize_database_url(self.COMPOSE_URL, in_docker=True),
+            self.COMPOSE_URL,
+        )
+
+    def test_other_hosts_untouched(self):
+        for url in (
+            "postgresql://user:pass@db.example.com:5432/prod",
+            "postgresql://postgres@localhost:5432/immo_db",
+            f"sqlite:///{TEST_DIR}/tests.db",
+            "",
+        ):
+            self.assertEqual(normalize_database_url(url, in_docker=False), url)
 
 
 class RateLimiterTest(unittest.TestCase):
