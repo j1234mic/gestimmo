@@ -125,8 +125,13 @@ class IntelligenceIntegrationTest(unittest.TestCase):
             "/tenant-portal/assistant/sessions", headers=tenant_headers, json={}
         )
         self.assertEqual(session.status_code, 201, session.text)
+        session_payload = session.json()
+        # ``session_id`` is the stable URL identifier.  The numeric ``id`` is
+        # retained for compatibility with clients that used the generic model
+        # serializer before the chat contract was made explicit.
+        self.assertEqual(session_payload["session_id"], session_payload["public_id"])
         message = self.client.post(
-            f"/tenant-portal/assistant/sessions/{session.json()['public_id']}/messages",
+            f"/tenant-portal/assistant/sessions/{session_payload['id']}/messages",
             headers=tenant_headers, json={"message": "Je veux créer un ticket pour une fuite"},
         )
         self.assertEqual(message.json()["intent"], "maintenance_ticket")
@@ -142,7 +147,7 @@ class IntelligenceIntegrationTest(unittest.TestCase):
         )
         self.assertEqual(ticket.status_code, 201, ticket.text)
         tracking = self.client.post(
-            f"/tenant-portal/assistant/sessions/{session.json()['public_id']}/messages",
+            f"/tenant-portal/assistant/sessions/{session_payload['session_id']}/messages",
             headers=tenant_headers, json={"message": "Quel est le statut de mon ticket ?"},
         )
         self.assertIn(ticket.json()["reference"], tracking.json()["answer"])
