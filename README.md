@@ -119,6 +119,32 @@ Le module documentaire ajoute :
 - **recherche** : plein texte sur titre, nom de fichier, OCR et tags, filtres type / date / bien / contact ;
 - **sécurité et conformité** : droits par rôle (lecture / écriture / suppression / administration), journal d'audit (consultation, téléchargement, modification), gel juridique, durée de rétention paramétrable et effacement RGPD refusé tant que la rétention ou le gel s'applique.
 
+## Module 12 — Administration et sécurité
+
+Le module d'administration ajoute :
+
+- **utilisateurs persistants** : création, modification, activation/désactivation, historique de connexion, révocation des sessions et changement de mot de passe ;
+- **RBAC granulaire** : profils prédéfinis, rôles personnalisables, droits par module et action (`create`, `read`, `update`, `delete`, `export`, `admin`) et périmètres société, agence ou portefeuille ; les dépendances historiques `require_*` appliquent désormais ces droits au module déduit de la route ;
+- **authentification renforcée** : politique de mot de passe, historique anti-réutilisation, expiration, blocage après échecs, session inactive, rotation du refresh token, 2FA TOTP/email/SMS et connexion mobile par challenge signé RSA/ECDSA (la validation biométrique reste effectuée dans l'enclave sécurisée du téléphone) ;
+- **SSO** : OAuth2 Authorization Code avec état signé, échange serveur et profil distant ; SAML 2.0 avec synchronisation des métadonnées, vérification XMLDSig/X.509, émetteur, audience, dates et anti-rejeu ;
+- **multi-sociétés / multi-agences** : identité visuelle, coordonnées, fiscalité, modèles, périmètres utilisateurs, rattachement société/agence/portefeuille des biens et reporting consolidé ou par agence ;
+- **paramétrage** : devise, langue, date, fuseau IANA, séquences transactionnelles de numérotation, indices IRL/ICC/ILAT/ILC et SMTP (secrets chiffrés au repos) ;
+- **audit** : journal transversal de toutes les mutations, détails avant/après pour l'administration, acteur, date, IP, historique par ressource et export CSV ;
+- **sauvegarde** : backup SQLite cohérent ou `pg_dump`, vérification SHA-256, déclencheur horaire du backup quotidien, backup manuel, rétention et restauration SQLite avec point de retour obligatoire ; PostgreSQL expose volontairement une procédure de restauration hors ligne `pg_restore` ;
+- **RGPD** : consentements et retraits, export JSON portable, demandes d'accès/portabilité/oubli, anonymisation, blocage par rétention ou gel juridique GED, registre des traitements et versions publiées de la politique de confidentialité.
+
+Les codes 2FA email/SMS ne sont retournés dans la réponse qu'en environnement non productif. En production, un SMTP actif ou `SMS_WEBHOOK_URL` est obligatoire : l'API échoue explicitement plutôt que de simuler un envoi.
+
+## Module 13 — Géolocalisation et cartographie
+
+Le module cartographique ajoute :
+
+- **carte GeoJSON** de tous les biens géolocalisés, filtres dynamiques (statut, type, ville, prix, société, agence, portefeuille et emprise), clusters selon le zoom et configuration plan OpenStreetMap / satellite Esri ;
+- **fiche de localisation** : points d'intérêt locaux (transports, écoles, commerces, hôpitaux, parcs), recherche par rayon, regroupement par catégorie et score pondéré explicable sur 100 ;
+- **temps de trajet** : distance Haversine, géométrie de liaison et durée estimée par mode voiture, marche, vélo ou transports ; les résultats internes sont identifiés comme estimations sans trafic et ne sont jamais présentés comme un guidage routier réel ;
+- **secteurs GeoJSON** : polygones validés, affectation d'agents, calcul point-dans-polygone, rattachement des biens et statistiques par zone ;
+- **tournées** : planification des visites, optimisation par plus proche voisin, ordre des arrêts, heures d'arrivée/départ, attente/retard estimés, distance et temps total, avec conservation du plan calculé.
+
 ## Démarrage avec Docker
 
 ```bash
@@ -154,6 +180,18 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 | `PAYMENT_CANCEL_URL` | Retour après annulation, accepte `{payment_id}` | URL locale |
 
 Sans `STRIPE_SECRET_KEY`, l'endpoint de paiement répond `503` au lieu de simuler un encaissement.
+
+### Configuration administration et sécurité
+
+| Variable | Utilité | Valeur par défaut |
+|---|---|---|
+| `SECRET_KEY` | Signature JWT et dérivation de la clé de chiffrement des secrets SMTP/SSO | valeur de développement à remplacer |
+| `BACKUP_DIR` | Stockage privé des sauvegardes | `backups` |
+| `ENVIRONMENT` | Masque les codes 2FA dès que la valeur est `production` | `development` |
+| `SMS_WEBHOOK_URL` | Passerelle HTTP `POST {to, message}` pour le 2FA SMS | vide |
+| `SMS_WEBHOOK_TOKEN` | Bearer token de la passerelle SMS | vide |
+
+En production, `SECRET_KEY` doit être une valeur aléatoire stable et sauvegardée : sa rotation invalide les JWT et empêche de relire les secrets SMTP/SSO déjà chiffrés.
 
 ## Principaux endpoints
 
@@ -298,6 +336,23 @@ Sans `STRIPE_SECRET_KEY`, l'endpoint de paiement répond `503` au lieu de simule
 - `GET|POST /templates`, `PUT /templates/{id}`, `POST /generate` — modèles et génération / prévisualisation ;
 - `POST /signatures`, `POST /signatures/{id}/send`, `GET /signatures/{id}`, `POST /signatures/{id}/signers/{id}/sign|decline`, `GET /signatures/{id}/evidence` — circuit de signature et dossier de preuve.
 
+### Administration et sécurité (`/api/admin`, `/api/auth`)
+
+- `POST|GET /api/admin/organizations`, `GET|PUT /api/admin/organizations/{id}`, `GET /api/admin/organizations/{id}/reporting`, `POST|GET /api/admin/agencies`, `PUT /api/admin/agencies/{id}` — sociétés, agences et reporting ;
+- `GET /api/admin/roles/profiles`, `POST|GET /api/admin/roles`, `GET|PUT|DELETE /api/admin/roles/{id}` — profils, rôles et matrice de permissions ;
+- `POST|GET /api/admin/users`, `GET|PUT /api/admin/users/{id}`, `POST /api/admin/users/{id}/activate|deactivate`, `PUT /api/admin/users/{id}/password`, `GET /api/admin/users/{id}/login-history` — comptes ;
+- `GET|PUT /api/admin/security-policy`, `POST /api/auth/login|refresh|logout`, `GET /api/auth/sessions`, `POST /api/auth/2fa/setup|confirm|verify` — politique, verrouillage, sessions et 2FA ;
+- `/api/auth/biometric/*`, `/api/auth/sso/{slug}/login|callback|acs`, `/api/admin/sso-providers` — appareils biométriques et SSO ;
+- `GET|PUT /api/admin/settings/general|smtp`, `/api/admin/settings/numbering`, `/api/admin/settings/reference-indices` — paramètres généraux ;
+- `GET /api/admin/audit-logs`, `GET /api/admin/audit-logs/export`, `/api/admin/backups`, `/api/admin/gdpr/*` — audit, sauvegarde et conformité.
+
+### Géolocalisation (`/api/geolocation`)
+
+- `GET /map/config`, `GET /map/properties`, `PUT /properties/{id}/coordinates` — carte, filtres, clusters et coordonnées ;
+- `POST|GET /points-of-interest`, `POST /points-of-interest/batch`, `GET /properties/{id}/location`, `POST /properties/{id}/location-score|travel-time` — proximité, score et trajets ;
+- `POST|GET /zones`, `GET|PUT|DELETE /zones/{id}`, `/zones/{id}/agents`, `/zones/{id}/statistics`, `POST /zones/assign-properties` — secteurs et agents ;
+- `POST|GET /visits`, `PUT /visits/{id}`, `POST /routes/optimize`, `GET /routes`, `GET /routes/{id}` — visites et tournées.
+
 ## Scoring
 
 Le score de candidature (0–100) est explicable et versionné. Il porte uniquement sur :
@@ -326,3 +381,5 @@ Le module 7 (copropriété) et les compléments du module 6 (bon de commande, co
 Le module 8 (CRM et gestion commerciale) est couvert par `tests/test_crm_module.py` : score de qualité explicable du prospect, cycle de vie d'un dossier dans le pipeline jusqu'au Kanban, workflow complet des visites (disponibilités réservées/libérées, confirmation, rappels, compte-rendu, retour visiteur, agenda jour/semaine/mois), matching automatique avec détail du score, publication multi-portails avec statistiques et taux de conversion, transaction de vente de l'offre d'achat à l'acte authentique (conditions suspensives bloquantes, commission HT/TTC) et performance des agents.
 
 Le module 9 (tableau de bord et reporting) est couvert par `tests/test_reporting_module.py` : KPIs temps réel et graphiques, widgets avec réorganisation drag & drop, les neuf rapports prédéfinis, les quatre formats d'export (PDF vérifié avec pypdf, Excel, CSV, Word), générateur de rapports personnalisés (filtres coercés vers les enums/dates, groupements avec agrégats), partage par jeton, planification d'exécution et alertes à seuils avec anti-spam et prise de connaissance.
+
+Les modules 12 et 13 sont couverts par `tests/test_modules_12_13.py` : rôles personnalisés et cloisonnement, désactivation et historique, verrouillage et 2FA, sociétés/agences, paramètres, indices, audit, backup SQLite et portabilité RGPD, carte GeoJSON, POI, score de localisation, zones/statistiques, temps de trajet, visites et optimisation de tournée. La suite complète comporte 49 tests d'intégration.
