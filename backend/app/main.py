@@ -6,6 +6,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 import logging
 import os
+import urllib.parse
+
+import sqlalchemy.exc
 
 # Imports des routeurs
 from app.routes.documents import router as documents_router
@@ -217,7 +220,27 @@ async def _backup_scheduler():
 @app.on_event("startup")
 async def startup():
     if settings.AUTO_CREATE_TABLES:
-        init_db()
+        try:
+            init_db()
+        except sqlalchemy.exc.OperationalError as exc:
+            # Message court et actionnable plutôt qu'une pile d'appels de 60 trames.
+            db_host = "localhost"
+            try:
+                db_host = urllib.parse.urlsplit(settings.DATABASE_URL).hostname or db_host
+            except ValueError:
+                pass
+            app_logger.error(
+                "❌ Impossible de joindre la base de données (%s).\n"
+                "   Cause racine : %s\n"
+                "   1) Le conteneur postgres est-il démarré ? -> docker compose up -d postgres\n"
+                "   2) L'API tourne hors Docker : l'hôte « postgres » a été remappé vers\n"
+                "      « localhost » ; vérifiez DATABASE_URL dans backend/.env\n"
+                "      (postgresql://immo_user:immo_password_2024@localhost:5432/immo_db)\n"
+                "   3) Ou lancez toute la stack dans Docker : docker compose up --build",
+                db_host,
+                exc.orig,
+            )
+            raise RuntimeError(f"Connexion impossible à la base de données ({db_host}) : {exc.orig}") from exc
     app.state.backup_task = asyncio.create_task(_backup_scheduler())
     app_logger.info("🚀 API démarrée !")
 
