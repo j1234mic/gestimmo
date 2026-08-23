@@ -1,6 +1,14 @@
 import os
 from pathlib import Path
 
+from dotenv import load_dotenv
+
+# Charge un éventuel fichier .env (développement local). Sans effet en Docker,
+# où les variables sont injectées par l'environnement. override=False pour ne
+# jamais écraser une variable déjà positionnée par l'hôte.
+load_dotenv()
+
+
 class Settings:
     ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
     APP_NAME = "API Gestion Immobilière"

@@ -28,6 +28,11 @@ services:
       - SECRET_KEY=${SECRET_KEY:-change-this-secret-before-production}
       - SMS_WEBHOOK_URL=${SMS_WEBHOOK_URL:-}
       - SMS_WEBHOOK_TOKEN=${SMS_WEBHOOK_TOKEN:-}
+      # Chat IA (Module 16) : lus depuis backend/.env ; vides = non configure.
+      - AI_CHAT_BASE_URL=${AI_CHAT_BASE_URL:-}
+      - AI_CHAT_MODEL=${AI_CHAT_MODEL:-}
+      - AI_CHAT_API_KEY=${AI_CHAT_API_KEY:-}
+      - AI_CHAT_TIMEOUT_SECONDS=${AI_CHAT_TIMEOUT_SECONDS:-25}
     ports:
       - "8000:8000"
     volumes:
