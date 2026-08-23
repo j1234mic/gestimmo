@@ -15,6 +15,14 @@ class Settings:
     AUTO_CREATE_TABLES = os.getenv("AUTO_CREATE_TABLES", "true").lower() == "true"
     SMS_WEBHOOK_URL = os.getenv("SMS_WEBHOOK_URL", "")
     SMS_WEBHOOK_TOKEN = os.getenv("SMS_WEBHOOK_TOKEN", "")
+    # Chat libre : endpoint compatible OpenAI (OpenAI, Azure proxy, Ollama,
+    # etc.). Sans ces variables, le chatbot métier reste local et le chat
+    # général explique clairement qu'aucun fournisseur n'est configuré.
+    AI_CHAT_BASE_URL = os.getenv("AI_CHAT_BASE_URL", "").rstrip("/")
+    AI_CHAT_API_KEY = os.getenv("AI_CHAT_API_KEY", "")
+    AI_CHAT_MODEL = os.getenv("AI_CHAT_MODEL", "")
+    AI_CHAT_TIMEOUT_SECONDS = float(os.getenv("AI_CHAT_TIMEOUT_SECONDS", "25"))
+
 
     # Paiement en ligne. Sans clé, l'endpoint de checkout répond explicitement 503.
     STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "")

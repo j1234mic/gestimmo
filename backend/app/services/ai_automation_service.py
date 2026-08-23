@@ -9,6 +9,7 @@ reproductible et auditable.
 from __future__ import annotations
 
 import math
+import json
 import re
 import statistics
 import unicodedata
@@ -16,6 +17,8 @@ import uuid
 from datetime import date, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any, Iterable, Optional
+
+import httpx
 
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
@@ -28,6 +31,7 @@ from app.models.ai_automation import (
     AutomationWorkflow,
     ChatMessage,
     ChatSession,
+    ChatKnowledge,
     IntelligentOCRJob,
     MarketObservation,
     MarketPriceIndex,
@@ -43,6 +47,7 @@ from app.models.maintenance import (
 from app.models.property import Property, PropertyHistory, PropertyStatus
 from app.models.tenant import Lease, LeaseStatus, PaymentStatus, RentPayment, Tenant, TenantNotification
 from app.services import maintenance_service
+from app.config import settings
 
 
 DISCLAIMER = (
@@ -543,17 +548,11 @@ def detect_financial_anomalies(db: Session, data, actor: str) -> AIPrediction:
 # ---------------------------------------------------------------------------
 # Chatbot et assistant gestionnaire
 # ---------------------------------------------------------------------------
-FAQS = [
-    ({"quittance", "reçu", "receipt"}, "Vos quittances sont disponibles dans Portail locataire > Paiements > Quittances."),
-    ({"payer", "paiement", "loyer"}, "Vous pouvez consulter vos échéances et régler un loyer depuis la rubrique Paiements de votre portail."),
-    ({"assurance", "attestation"}, "Déposez votre attestation d'assurance dans Documents. Elle sera contrôlée puis rattachée à votre logement."),
-    ({"préavis", "congé", "quitter"}, "La durée du préavis dépend du bail et de votre situation. Utilisez la rubrique Bail pour préparer une demande, puis faites-la valider."),
-    ({"urgence", "fuite", "panne"}, "En cas de danger immédiat, contactez les secours. Pour le logement, créez un ticket en indiquant le bien, la pièce et des photos."),
-    ({"rendez-vous", "rdv", "visite"}, "Je peux préparer une demande de rendez-vous. Indiquez la date, le motif et le bien concerné."),
-]
-
+# Les réponses de connaissances ne sont pas codées en dur : elles sont
+# fournies par le modèle configuré et la mémoire conversationnelle isolée.
 MANAGER_SUGGESTIONS = ["Rechercher un bien", "Voir les impayés", "Tickets en cours", "Baux qui arrivent à échéance"]
 TENANT_SUGGESTIONS = ["Consulter mes paiements", "Créer un ticket", "Prendre rendez-vous"]
+
 
 # Vocabulaire normalisé (sans accent) utilisé par le moteur d'intentions.
 _ENTITY_KEYWORDS = {
@@ -630,12 +629,6 @@ def _normalize_words(message: str) -> set[str]:
     """Tokens minuscules et sans accent : « Impayés » et « impaye » se valent."""
     return set(re.findall(r"[a-z0-9]+", _normalize_text(message)))
 
-
-# Les mots-clés de la FAQ sont indexés sans accent pour rester comparables.
-_FAQ_INDEX = [
-    ({_strip_accents(keyword.casefold()) for keyword in keywords}, answer)
-    for keywords, answer in FAQS
-]
 
 
 def _enum_value(value) -> str:
@@ -1040,17 +1033,6 @@ def _tenant_help(db: Session, session: ChatSession, message: str, words: set[str
     return _reply("tenant_help", 0.8 if greeting else 0.75, answer, TENANT_SUGGESTIONS)
 
 
-def _faq_reply(words: set[str], suggestions: list[str]) -> Optional[dict]:
-    best = None
-    for keywords, response in _FAQ_INDEX:
-        overlap = len(words & keywords)
-        if overlap and (best is None or overlap > best[0]):
-            best = (overlap, response)
-    if not best:
-        return None
-    return _reply("faq", min(0.95, 0.65 + best[0] * 0.12), best[1], suggestions)
-
-
 def _resolve_manager_intent(db: Session, message: str, words: set[str]) -> dict:
     entities = _detect_entities(words)
     has_search_verb = bool(words & _SEARCH_VERBS)
@@ -1080,9 +1062,6 @@ def _resolve_manager_intent(db: Session, message: str, words: set[str]) -> dict:
         return _reply("smalltalk", 0.7, "Avec plaisir. Autre chose ? Je peux chercher un dossier, faire le point sur les impayés ou préparer une action.", MANAGER_SUGGESTIONS)
     if words & _HELP_WORDS:
         return _manager_help(db, message, words)
-    faq = _faq_reply(words, MANAGER_SUGGESTIONS)
-    if faq:
-        return faq
     return _manager_fallback(db, message, words)
 
 
@@ -1095,9 +1074,6 @@ def _resolve_tenant_intent(db: Session, session: ChatSession, message: str, word
         return _tenant_lease(db, session, message, words)
     if words & _APPOINTMENT_WORDS:
         return _tenant_appointment(db, session, message, words)
-    faq = _faq_reply(words, TENANT_SUGGESTIONS)
-    if faq:
-        return faq
     if words & _GREETINGS:
         return _tenant_help(db, session, message, words, greeting=True)
     if words & _THANKS:
@@ -1220,6 +1196,125 @@ def _conversational_turn(
     return None
 
 
+def _chat_actor_id(session: ChatSession) -> int:
+    return session.tenant_id if session.actor_type == "tenant" else session.user_id
+
+
+def _knowledge_matches(db: Session, session: ChatSession, message: str) -> list[ChatKnowledge]:
+    """Récupère une mémoire pertinente sans mélanger les utilisateurs."""
+    words = _normalize_words(message)
+    if not words:
+        return []
+    rows = (
+        db.query(ChatKnowledge)
+        .filter(ChatKnowledge.actor_type == session.actor_type, ChatKnowledge.actor_id == _chat_actor_id(session))
+        .order_by(ChatKnowledge.last_used_at.desc())
+        .limit(50)
+        .all()
+    )
+    scored = []
+    for row in rows:
+        known = set(row.normalized_question.split())
+        score = len(words & known) / max(1, len(words | known))
+        if score >= 0.18:
+            scored.append((score, row))
+    return [row for _, row in sorted(scored, key=lambda item: item[0], reverse=True)[:3]]
+
+
+def _recent_chat_messages(db: Session, session: ChatSession) -> list[dict]:
+    rows = (
+        db.query(ChatMessage)
+        .filter(ChatMessage.session_id == session.id)
+        .order_by(ChatMessage.id.desc())
+        .limit(8)
+        .all()
+    )
+    return [{"role": "assistant" if row.role == "assistant" else "user", "content": row.content} for row in reversed(rows)]
+
+
+def _openai_chat(messages: list[dict]) -> str:
+    if not (settings.AI_CHAT_BASE_URL and settings.AI_CHAT_MODEL):
+        raise RuntimeError("Le chat général n'est pas configuré")
+    url = settings.AI_CHAT_BASE_URL
+    if not url.endswith("/chat/completions"):
+        url = f"{url}/chat/completions"
+    headers = {"Content-Type": "application/json"}
+    if settings.AI_CHAT_API_KEY:
+        headers["Authorization"] = f"Bearer {settings.AI_CHAT_API_KEY}"
+    try:
+        response = httpx.post(
+            url, headers=headers,
+            json={"model": settings.AI_CHAT_MODEL, "messages": messages, "temperature": 0.35},
+            timeout=settings.AI_CHAT_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+        content = response.json()["choices"][0]["message"]["content"]
+    except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError) as exc:
+        raise RuntimeError("Le fournisseur IA ne répond pas correctement") from exc
+    if not isinstance(content, str) or not content.strip():
+        raise RuntimeError("Le fournisseur IA a retourné une réponse vide")
+    return content.strip()
+
+
+def _general_chat(db: Session, session: ChatSession, message: str) -> dict:
+    """Réponse libre via un modèle configuré, enrichie par la mémoire de l'acteur.
+
+    La mémoire est un apprentissage par récupération (RAG léger), et non un
+    fine-tuning opaque. Les actions métier restent dans les endpoints confirmés.
+    """
+    matches = _knowledge_matches(db, session, message)
+    exact = next((row for row in matches if row.normalized_question == " ".join(sorted(_normalize_words(message)))), None)
+    if exact:
+        exact.usage_count += 1
+        exact.last_used_at = utcnow()
+        return _reply("learned_answer", 0.86, exact.answer, [], results=[])
+
+    if not (settings.AI_CHAT_BASE_URL and settings.AI_CHAT_MODEL):
+        return _reply(
+            "ai_not_configured", 0.0,
+            "Le chat libre nécessite un fournisseur IA configuré. Définissez AI_CHAT_BASE_URL et AI_CHAT_MODEL "
+            "(et AI_CHAT_API_KEY si nécessaire). Les questions restent enregistrées dans cette conversation, "
+            "mais aucune réponse inventée n'est produite.",
+            [],
+        )
+    memories = "\n".join(f"Question : {row.question}\nRéponse : {row.answer}" for row in matches)
+    system = (
+        "Tu es un assistant conversationnel francophone. Réponds à toute question de façon utile, honnête et concise. "
+        "N'invente jamais de données privées, de sources ou d'actions effectuées. "
+        "Pour une action de gestion immobilière, explique qu'une confirmation explicite est requise."
+    )
+    if memories:
+        system += "\nMémoire privée de conversations précédentes (à utiliser seulement si pertinente) :\n" + memories
+    try:
+        answer = _openai_chat([{"role": "system", "content": system}, *_recent_chat_messages(db, session)])
+    except RuntimeError as exc:
+        return _reply("ai_unavailable", 0.0, f"Je ne peux pas répondre pour le moment : {exc}.", [])
+    return _reply("general_ai", 0.78, answer, [])
+
+
+def _learn_chat_turn(db: Session, session: ChatSession, message: str, outcome: dict) -> None:
+    """Enregistre automatiquement une question et une réponse exploitable pour le même acteur."""
+    if outcome["intent"] in {"ai_not_configured", "ai_unavailable"}:
+        return
+    normalized = " ".join(sorted(_normalize_words(message)))[:1000]
+    if not normalized:
+        return
+    row = (
+        db.query(ChatKnowledge)
+        .filter(ChatKnowledge.actor_type == session.actor_type, ChatKnowledge.actor_id == _chat_actor_id(session), ChatKnowledge.normalized_question == normalized)
+        .first()
+    )
+    if row:
+        row.answer = outcome["answer"]
+        row.usage_count += 1
+        row.last_used_at = utcnow()
+    else:
+        db.add(ChatKnowledge(
+            actor_type=session.actor_type, actor_id=_chat_actor_id(session), question=message,
+            normalized_question=normalized, answer=outcome["answer"],
+        ))
+
+
 def answer_chat(db: Session, session: ChatSession, message: str, context: dict) -> dict:
     """Répond dans un dialogue continu, avec données réelles et contexte récent.
 
@@ -1236,6 +1331,12 @@ def answer_chat(db: Session, session: ChatSession, message: str, context: dict) 
         outcome = _resolve_manager_intent(db, message, words)
     elif outcome is None:
         outcome = _resolve_tenant_intent(db, session, message, words)
+
+    # Aucun catalogue de questions/réponses : les demandes hors opérations
+    # métier sont confiées au modèle conversationnel et mémorisées par acteur.
+    if outcome["intent"] == "fallback":
+        outcome = _general_chat(db, session, message)
+    _learn_chat_turn(db, session, message, outcome)
 
     assistant = ChatMessage(
         session_id=session.id,
@@ -1263,6 +1364,8 @@ def answer_chat(db: Session, session: ChatSession, message: str, context: dict) 
         "results": outcome["results"],
         "available_24_7": True,
         "automated_response": True,
+        "learning": {"enabled": True, "scope": "private_actor_memory", "model_training": False},
+        "response_source": "memory" if outcome["intent"] == "learned_answer" else "ai" if outcome["intent"] == "general_ai" else "business_data",
     }
 
 

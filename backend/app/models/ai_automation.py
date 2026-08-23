@@ -90,6 +90,28 @@ class ChatMessage(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
 
 
+class ChatKnowledge(Base):
+    """Mémoire conversationnelle isolée par acteur.
+
+    Ce n'est pas un entraînement des poids d'un modèle : les questions et les
+    réponses validées par la conversation sont réutilisées comme contexte lors
+    du prochain appel au fournisseur IA. Cette séparation évite qu'une donnée
+    d'un locataire soit proposée à un autre utilisateur.
+    """
+
+    __tablename__ = "ai_chat_knowledge"
+
+    id = Column(Integer, primary_key=True)
+    actor_type = Column(String(20), nullable=False, index=True)
+    actor_id = Column(Integer, nullable=False, index=True)
+    question = Column(Text, nullable=False)
+    normalized_question = Column(String(1000), nullable=False, index=True)
+    answer = Column(Text, nullable=False)
+    usage_count = Column(Integer, default=1, nullable=False)
+    last_used_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+
 class AssistantAppointment(Base):
     __tablename__ = "ai_assistant_appointments"
 
