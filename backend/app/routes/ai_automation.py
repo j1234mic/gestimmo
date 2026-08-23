@@ -491,12 +491,11 @@ def list_indices(
 # ---------------------------------------------------------------------------
 @tenant_router.get("/faq")
 def tenant_faq():
+    """Compatibilité : le chatbot n'expose plus de questions pré-écrites."""
     return {
         "available_24_7": True,
-        "topics": [
-            {"keywords": sorted(keywords), "answer": answer}
-            for keywords, answer in service.FAQS
-        ],
+        "predefined_questions": False,
+        "message": "Posez votre question librement. Les réponses métier utilisent vos données autorisées ; les autres questions utilisent le fournisseur IA configuré.",
     }
 
 

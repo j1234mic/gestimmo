@@ -165,6 +165,29 @@ Le module IA (`/api/ai`) fournit des résultats explicables et historisés, touj
 
 Les profils RBAC possèdent un module granulaire `artificial_intelligence`. Les scores d'impayé ne prennent aucune décision d'acceptation/refus et leur réponse indique explicitement `protected_attributes_used: []`.
 
+
+### Chat libre sans questions prédéfinies
+
+L'assistant n'utilise plus de catalogue FAQ. Les demandes métier continuent à
+interroger les données autorisées de GestImmo ; toute autre question est envoyée
+à un fournisseur **compatible OpenAI** configuré par l'administrateur. Chaque
+tour est mémorisé automatiquement dans une mémoire privée, limitée au locataire
+ou gestionnaire qui l'a posé, puis réutilisé comme contexte pour ses prochaines
+questions. C'est un apprentissage par mémoire (RAG léger), **pas** un
+entraînement opaque des poids du modèle.
+
+| Variable | Utilité |
+|---|---|
+| `AI_CHAT_BASE_URL` | URL racine de l'API compatible OpenAI (l'API appelle `/chat/completions`) |
+| `AI_CHAT_MODEL` | Nom du modèle conversationnel |
+| `AI_CHAT_API_KEY` | Clé API, si le fournisseur l'exige |
+| `AI_CHAT_TIMEOUT_SECONDS` | Délai maximal de l'appel, 25 secondes par défaut |
+
+Exemple : `AI_CHAT_BASE_URL=https://api.openai.com/v1`,
+`AI_CHAT_MODEL=gpt-4.1-mini`. Si ces variables ne sont pas définies, le système
+n'invente pas de réponse libre et indique explicitement que le fournisseur doit
+être configuré. Les opérations de gestion restent soumises à confirmation.
+
 ## Module 17 — Intégrations et API
 
 Le module d'intégration (`/api/integrations`) ajoute :
