@@ -159,7 +159,7 @@ def review_prediction(
 @router.post("/assistant/sessions", status_code=201)
 def manager_session(data: ChatSessionCreate, db: Session = Depends(get_db), user=Depends(ai_create)):
     row = service.create_chat_session(db, "manager", user.db_id or 0, data.locale, data.context)
-    return service.model_view(row)
+    return service.chat_session_view(row)
 
 
 @router.post("/assistant/sessions/{session_id}/messages", status_code=201)
@@ -507,7 +507,7 @@ def tenant_session(
     tenant=Depends(get_current_tenant),
 ):
     row = service.create_chat_session(db, "tenant", tenant.id, data.locale, data.context)
-    return service.model_view(row)
+    return service.chat_session_view(row)
 
 
 @tenant_router.post("/sessions/{session_id}/messages", status_code=201)

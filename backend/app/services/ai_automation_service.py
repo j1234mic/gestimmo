@@ -76,6 +76,19 @@ def model_view(row) -> dict:
     return result
 
 
+def chat_session_view(row: ChatSession) -> dict:
+    """Expose the stable public identifier used by chat message routes.
+
+    ``id`` is the database primary key and ``public_id`` is the identifier
+    intended for URLs.  Returning an explicit ``session_id`` alias prevents a
+    client from accidentally using the former when building the next request.
+    The old fields remain in the response for backwards compatibility.
+    """
+    result = model_view(row)
+    result["session_id"] = row.public_id
+    return result
+
+
 def prediction_view(row: AIPrediction) -> dict:
     data = model_view(row)
     data["disclaimer"] = DISCLAIMER
@@ -554,10 +567,26 @@ def create_chat_session(db: Session, actor_type: str, actor_id: int, locale: str
     return row
 
 
-def get_chat_session(db: Session, public_id: str, actor_type: str, actor_id: int) -> ChatSession:
-    query = db.query(ChatSession).filter(ChatSession.public_id == public_id, ChatSession.actor_type == actor_type)
+def get_chat_session(db: Session, session_identifier: str, actor_type: str, actor_id: int) -> ChatSession:
+    """Return a chat session belonging to the authenticated actor.
+
+    Chat URLs use ``public_id``.  Older clients, however, used the ``id``
+    returned by the generic model serializer, which caused a newly-created
+    session to become impossible to use and resulted in a misleading
+    "session introuvable" response.  Accept both representations while
+    keeping the actor filter on every lookup so this compatibility path cannot
+    cross tenant or manager boundaries.
+    """
+    identifier = str(session_identifier or "").strip()
+    query = db.query(ChatSession).filter(ChatSession.actor_type == actor_type)
     query = query.filter(ChatSession.tenant_id == actor_id) if actor_type == "tenant" else query.filter(ChatSession.user_id == actor_id)
-    row = query.first()
+
+    # The public UUID-like identifier is the preferred lookup.  A numeric
+    # value is also accepted as the legacy database id, but only together with
+    # the same ownership constraints above.
+    row = query.filter(ChatSession.public_id == identifier).first()
+    if row is None and identifier.isdigit():
+        row = query.filter(ChatSession.id == int(identifier)).first()
     if not row:
         raise ValueError("Session de conversation introuvable")
     return row
