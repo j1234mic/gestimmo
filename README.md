@@ -153,6 +153,30 @@ L'API expose un socle mobile pour les applications gestionnaire, locataire, prop
 
 Contrats PNO, MRH, GLI, responsabilité civile et copropriété (`/api/insurance/contracts`), demandes d'attestations, déclarations et suivi des sinistres avec preuves (`/api/insurance/claims`), ainsi qu'un reporting échéances et indemnisation (`/api/insurance/reporting`). Les opérations sont protégées par les droits RBAC existants.
 
+## Module 16 — Intelligence artificielle et automatisation
+
+Le module IA (`/api/ai`) fournit des résultats explicables et historisés, toujours présentés comme des aides à la décision :
+
+- **estimations et risques** : estimation du loyer et recommandation du prix de vente par régression ridge/comparables locaux, risque de vacance, scoring dynamique d'impayé sans attribut protégé, et détection d'anomalies financières par écart absolu médian et contrôle des doublons ; chaque résultat conserve entrées, méthode, confiance, facteurs, limites et revue humaine ;
+- **assistant 24/7** : FAQ, échéances et suivi de tickets depuis `/tenant-portal/assistant`, création confirmée de ticket et demande de rendez-vous ; l'assistant gestionnaire recherche biens, locataires, baux et tickets, propose des actions rapides avec confirmation et affiche une aide contextuelle ; les conversations locataires sont isolées par leur JWT portail ;
+- **RPA** : workflows versionnés avec conditions configurables, opérateurs contrôlés, variables `${event.champ}`, déclencheurs événementiels, clés d'idempotence, dry-run et journal complet. Les actions sont limitées à une liste sûre (notification, ticket, changement de statut, événement webhook et tâche) ; aucun code arbitraire n'est exécuté ;
+- **OCR intelligent** : réutilisation du stockage privé et de l'OCR GED, classification, extraction de montants/références de facture et données de bail, contrôles de cohérence et file de revue manuelle quand le texte ou la confiance sont insuffisants ;
+- **marché** : observations de veille, concurrents, comparables, séries locales au prix/m² et indices sourcés. Les données externes doivent être importées ou fournies par un connecteur : l'API ne fabrique pas de tendance.
+
+Les profils RBAC possèdent un module granulaire `artificial_intelligence`. Les scores d'impayé ne prennent aucune décision d'acceptation/refus et leur réponse indique explicitement `protected_attributes_used: []`.
+
+## Module 17 — Intégrations et API
+
+Le module d'intégration (`/api/integrations`) ajoute :
+
+- **API REST publique versionnée** sous `/api/v1`, documentée dans Swagger (`/docs`), ReDoc (`/redoc`) et OpenAPI (`/openapi.json`) ; authentification au choix par `X-API-Key` ou OAuth2 `client_credentials`, scopes, expiration/révocation et rate limiting par client avec en-têtes `X-RateLimit-*` ; les secrets et clés brutes ne sont affichés qu'une fois, puis seul leur hash est conservé ;
+- **webhooks HMAC-SHA256** : abonnements par événement, secret chiffré au repos, file de livraison, signature horodatée `X-Gestimmo-Signature`, tentatives, backoff, replay et désactivation après échecs répétés. Les destinations privées/réservées sont refusées en production pour prévenir le SSRF ;
+- **connecteurs natifs déclarés** pour Sage, QuickBooks, Xero, synchronisation bancaire, Stripe, GoCardless, PayPal, DocuSign, Yousign, SendGrid, Mailgun, SMTP, Twilio, OVH, S3, Google Cloud Storage, Google Maps, Mapbox, SeLoger, LeBonCoin, Google Calendar, Outlook, Salesforce, HubSpot, Power BI et Tableau. Les credentials sont chiffrés ; un test local ne prétend jamais avoir joint un fournisseur et une synchronisation indique clairement lorsqu'un worker/adaptateur distant reste à déployer ;
+- **import, migration et export massifs** : analyse CSV/XLSX, suggestion et correction du mapping, aperçu, validation, détection des doublons (`skip`, `update`, `error`), dry-run, rapport ligne par ligne, export CSV/XLSX/JSON et conservation des fichiers en stockage privé ;
+- **Zapier et Make** : catalogue préconfiguré de triggers, actions et recherches reposant sur les webhooks et l'API v1.
+
+Les droits du module sont regroupés sous `integrations`. Une clé limitée à `properties:read` ne peut par exemple ni créer un bien ni lire l'annuaire locataire.
+
 ## Démarrage avec Docker
 
 ```bash

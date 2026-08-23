@@ -55,6 +55,7 @@ DOCUMENT_TYPES = [
     "identity",
     "diagnostic",
     "insurance",
+    "facture",
     "other",
 ]
 
@@ -73,6 +74,7 @@ CLASSIFICATION_KEYWORDS = {
     "identity": ("carte nationale", "passeport", "republique francaise"),
     "diagnostic": ("diagnostic", "dpe", "amiante", "plomb"),
     "insurance": ("attestation d'assurance", "multirisque", "assureur"),
+    "facture": ("facture", "total ttc", "numero de facture", "date d'echeance"),
 }
 
 SYSTEM_DOC_TEMPLATES: List[Dict[str, Any]] = [
