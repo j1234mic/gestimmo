@@ -24,17 +24,23 @@ services:
       - DATABASE_URL=postgresql://immo_user:immo_password_2024@postgres:5432/immo_db
       - AUTO_CREATE_TABLES=true
       - DEBUG=false
+      - ENVIRONMENT=production
+      - SECRET_KEY=${SECRET_KEY:-change-this-secret-before-production}
+      - SMS_WEBHOOK_URL=${SMS_WEBHOOK_URL:-}
+      - SMS_WEBHOOK_TOKEN=${SMS_WEBHOOK_TOKEN:-}
     ports:
       - "8000:8000"
     volumes:
       - public_uploads:/app/uploads
       - private_uploads:/app/private_uploads
+      - backups:/app/backups
     networks:
       - immo_network
 volumes:
   postgres_data:
   public_uploads:
   private_uploads:
+  backups:
 networks:
   immo_network:
     driver: bridge

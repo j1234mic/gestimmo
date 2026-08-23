@@ -34,6 +34,52 @@ from app.utils.logger import security_logger
 
 router = APIRouter(prefix="/api/properties", tags=["Properties"])
 
+
+def _has_property_action(user, action: str) -> bool:
+    return bool(user and (getattr(user, "is_superuser", False) or any(
+        permission.get("module") in {"*", "properties"} and action in (permission.get("actions") or [])
+        for permission in getattr(user, "granular_permissions", [])
+    )))
+
+
+def _has_global_property_scope(user) -> bool:
+    return bool(user and (getattr(user, "is_superuser", False) or any(
+        permission.get("module") in {"*", "properties"} and permission.get("scope_type") == "all"
+        for permission in getattr(user, "granular_permissions", [])
+    )))
+
+
+def _property_in_scope(user, property_obj) -> bool:
+    if _has_global_property_scope(user):
+        return True
+    if not user or getattr(user, "db_id", None) is None:
+        return True
+    return any(
+        property_obj.entity_id == scope["organization_id"]
+        and (scope["agency_id"] is None or property_obj.agency_id == scope["agency_id"])
+        and (not scope["portfolio_ids"] or property_obj.portfolio_id in scope["portfolio_ids"])
+        for scope in user.data_scopes
+    )
+
+
+def _prepare_property_scope(data, user):
+    if _has_global_property_scope(user) or getattr(user, "db_id", None) is None:
+        return
+    if data.entity_id is None and len(user.organization_ids) == 1:
+        data.entity_id = user.organization_ids[0]
+    if data.agency_id is None and len(user.agency_ids) == 1:
+        data.agency_id = user.agency_ids[0]
+    if data.entity_id not in user.organization_ids:
+        raise HTTPException(status_code=403, detail="Société hors périmètre")
+    if (
+        data.agency_id is not None
+        and data.entity_id not in user.organization_wide_ids
+        and data.agency_id not in user.agency_ids
+    ):
+        raise HTTPException(status_code=403, detail="Agence hors périmètre")
+    if data.portfolio_id is not None and user.portfolio_ids and data.portfolio_id not in user.portfolio_ids:
+        raise HTTPException(status_code=403, detail="Portefeuille hors périmètre")
+
 # ============================================
 # CREATE - Authentification requise + Permission write
 # ============================================
@@ -45,6 +91,7 @@ def create_new_property(
     current_user = Depends(require_write)
 ):
     """Créer un nouveau bien immobilier."""
+    _prepare_property_scope(property_data, current_user)
     try:
         result = create_property(db, property_data)
         return result
@@ -69,12 +116,17 @@ def list_properties(
     min_area: Optional[float] = Query(None),
     max_area: Optional[float] = Query(None),
     min_rooms: Optional[int] = Query(None),
+    entity_id: Optional[int] = Query(None),
+    agency_id: Optional[int] = Query(None),
+    portfolio_id: Optional[int] = Query(None),
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
     current_user = Depends(get_optional_user)
 ):
     """Lister les biens avec filtres."""
+    if current_user and getattr(current_user, "db_id", None) is not None and not _has_property_action(current_user, "read"):
+        raise HTTPException(status_code=403, detail="Permission properties:read requise")
     skip = (page - 1) * limit
 
     # ✅ Si NON connecté et AUCUN statut spécifié → montrer seulement "available"
@@ -92,8 +144,19 @@ def list_properties(
         max_price=max_price,
         min_area=min_area,
         max_area=max_area,
-        min_rooms=min_rooms
+        min_rooms=min_rooms,
+        entity_id=entity_id,
+        agency_id=agency_id,
+        portfolio_id=portfolio_id,
     )
+    if current_user and getattr(current_user, "db_id", None) is not None and not _has_global_property_scope(current_user):
+        if entity_id is not None and entity_id not in current_user.organization_ids:
+            raise HTTPException(status_code=403, detail="Société hors périmètre")
+        if agency_id is not None and agency_id not in current_user.agency_ids:
+            raise HTTPException(status_code=403, detail="Agence hors périmètre")
+        if portfolio_id is not None and portfolio_id not in current_user.portfolio_ids:
+            raise HTTPException(status_code=403, detail="Portefeuille hors périmètre")
+        filters.allowed_scopes = current_user.data_scopes
 
     properties, total = get_properties(db, filters, skip, limit)
 
@@ -132,6 +195,8 @@ def get_property_detail(
     if not property_obj:
         raise HTTPException(status_code=404, detail="Bien non trouvé")
 
+    if current_user and not _property_in_scope(current_user, property_obj):
+        raise HTTPException(status_code=403, detail="Bien hors périmètre")
     if not current_user and property_obj.status != "available":
         raise HTTPException(status_code=403, detail="Accès non autorisé")
 
@@ -157,6 +222,23 @@ def update_property_info(
 
     if not existing:
         raise HTTPException(status_code=404, detail="Bien non trouvé")
+    if not _property_in_scope(current_user, existing):
+        raise HTTPException(status_code=403, detail="Bien hors périmètre")
+    if not _has_global_property_scope(current_user) and getattr(current_user, "db_id", None) is not None:
+        if property_data.entity_id is not None and property_data.entity_id not in current_user.organization_ids:
+            raise HTTPException(status_code=403, detail="Société hors périmètre")
+        target_entity = property_data.entity_id if property_data.entity_id is not None else existing.entity_id
+        if (
+            property_data.agency_id is not None
+            and target_entity not in current_user.organization_wide_ids
+            and property_data.agency_id not in current_user.agency_ids
+        ):
+            raise HTTPException(status_code=403, detail="Agence hors périmètre")
+        if (
+            property_data.portfolio_id is not None and current_user.portfolio_ids
+            and property_data.portfolio_id not in current_user.portfolio_ids
+        ):
+            raise HTTPException(status_code=403, detail="Portefeuille hors périmètre")
 
     property_obj = update_property(db, property_id, property_data)
     return property_obj
@@ -177,6 +259,8 @@ def delete_property_endpoint(
     existing = get_property(db, property_id)
     if not existing:
         raise HTTPException(status_code=404, detail="Bien non trouvé")
+    if not _property_in_scope(current_user, existing):
+        raise HTTPException(status_code=403, detail="Bien hors périmètre")
 
     delete_property(db, property_id)
     return {
@@ -192,43 +276,6 @@ def delete_property_endpoint(
 async def upload_property_photos(
     property_id: int,
     files: List[UploadFile] = File(...),
-    db: Session = Depends(get_db),
-    current_user = Depends(require_write)
-):
-    """Uploader des photos pour un bien."""
-   
-    property_obj = get_property(db, property_id)
-    if not property_obj:
-        raise HTTPException(status_code=404, detail="Bien non trouvé")
-
-    for file in files:
-        ext = file.filename.split('.')[-1].lower()
-        if ext not in settings.ALLOWED_EXTENSIONS:
-            raise HTTPException(status_code=400, detail=f"Extension non autorisée: {ext}")
-
-    upload_dir = os.path.join(settings.upload_dir_path, str(property_id))
-    os.makedirs(upload_dir, exist_ok=True)
-
-    results = []
-    for file in files:
-        filename = f"{uuid.uuid4()}_{file.filename}"
-        file_path = os.path.join(upload_dir, filename)
-
-        async with aiofiles.open(file_path, 'wb') as f:
-            content = await file.read()
-            await f.write(content)
-
-        results.append({"filename": filename, "url": f"/uploads/{property_id}/{filename}"})
-
-    return {"uploaded": results}
-
-# backend/app/routes/properties.py
-# Remplacez la route upload_property_photos par celle-ci :
-
-@router.post("/{property_id}/photos")
-async def upload_property_photos(
-    property_id: int,
-    files: List[UploadFile] = File(...),
     is_main: Optional[bool] = False,
     db: Session = Depends(get_db),
     current_user = Depends(require_write)
@@ -237,6 +284,8 @@ async def upload_property_photos(
     property_obj = get_property(db, property_id)
     if not property_obj:
         raise HTTPException(status_code=404, detail="Bien non trouvé")
+    if not _property_in_scope(current_user, property_obj):
+        raise HTTPException(status_code=403, detail="Bien hors périmètre")
 
     # Vérifier les extensions
     for file in files:

@@ -70,6 +70,12 @@ class Property(Base):
     country = Column(String(100), default="France")
     latitude = Column(Float)
     longitude = Column(Float)
+
+    # Cloisonnement multi-sociétés / multi-agences (module 12). Ces clés sont
+    # volontairement sans FK afin de conserver l'import de données historiques.
+    entity_id = Column(Integer, index=True)
+    agency_id = Column(Integer, index=True)
+    portfolio_id = Column(Integer, index=True)
     
     # Caractéristiques physiques
     living_area = Column(Float)  # Surface habitable en m²

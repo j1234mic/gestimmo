@@ -30,7 +30,7 @@ async def get_current_owner(
     Repose sur l'authentification JWT existante (`app.auth.get_current_user`),
     puis résout l'enregistrement `Owner` en base à partir de l'email du compte.
     """
-    user = await get_current_user(request)
+    user = await get_current_user(request, db)
 
     owner = db.query(Owner).filter(Owner.email == user.email).first()
     if owner is None:
