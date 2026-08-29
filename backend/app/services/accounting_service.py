@@ -7,7 +7,9 @@ from datetime import date, datetime
 from typing import Optional
 
 from app.models.accounting import OwnerTransaction, OwnerBalance, TransactionType
-from app.models.owner import Owner
+from app.models.owner import Owner, PropertyOwner
+from app.models.property import Property
+from app.models.tenant import Lease
 from app.schemas.accounting import TransactionCreate
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
@@ -164,6 +166,56 @@ def get_monthly_summary(db: Session, owner_id: int, year: int, month: int):
             }
             for t in transactions
         ]
+    }
+
+
+def get_owner_property_summary(db: Session, owner_id: int):
+    """Synthèse financière par bien pour un propriétaire."""
+    links = db.query(PropertyOwner).filter(PropertyOwner.owner_id == owner_id).all()
+    results = []
+    for link in links:
+        prop = db.query(Property).filter(Property.id == link.property_id).first()
+        if not prop:
+            continue
+        transactions = db.query(OwnerTransaction).filter(
+            OwnerTransaction.owner_id == owner_id,
+            OwnerTransaction.property_id == prop.id,
+            OwnerTransaction.status == "completed",
+        ).all()
+
+        income = sum(t.amount for t in transactions if t.amount > 0)
+        expenses = sum(abs(t.amount) for t in transactions if t.amount < 0)
+        occupied = db.query(Lease).filter(
+            Lease.property_id == prop.id,
+            Lease.status == "active"
+        ).count() > 0
+
+        results.append({
+            "property_id": prop.id,
+            "reference": prop.reference,
+            "title": prop.title,
+            "city": prop.city,
+            "status": prop.status.value if prop.status else None,
+            "ownership_percentage": link.ownership_percentage,
+            "is_main_owner": link.is_main_owner,
+            "acquisition_date": link.acquisition_date.isoformat() if link.acquisition_date else None,
+            "acquisition_price": link.acquisition_price,
+            "current_rent": prop.rent_price,
+            "current_sale_price": prop.sale_price,
+            "occupied": occupied,
+            "income": income,
+            "expenses": expenses,
+            "balance": income - expenses,
+            "transaction_count": len(transactions),
+        })
+    total_income = sum(r["income"] for r in results)
+    total_expenses = sum(r["expenses"] for r in results)
+    return {
+        "owner_id": owner_id,
+        "total_income": total_income,
+        "total_expenses": total_expenses,
+        "total_balance": total_income - total_expenses,
+        "properties": results,
     }
 
 

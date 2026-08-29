@@ -7,24 +7,57 @@ API FastAPI couvrant la gestion des biens, des propriétaires et des locataires.
 Le détail complet, module par module et avec les preuves d'exécution, est dans
 [`AUDIT-MODULES.md`](AUDIT-MODULES.md). En synthèse :
 
-- **complets et couverts par des tests d'intégration** : modules 3, 4, 5, 6, 7,
-  8, 9, 10, 11, 12, 13, 16 et 17 ;
-- **inachevés et sans aucun test** : modules 1 (biens) et 2 (propriétaires) —
-  vidéos de galerie, visite 360°, recherches favorites, filtres par
-  propriétaire/gestionnaire, export CSV et rapport d'évaluation PDF manquants
-  pour le premier ; signature de mandat réduite à un changement de statut et
-  absence de synthèse financière par bien pour le second ;
-- **socle API uniquement** : modules 14 (mobile) et 15 (assurances). Le dépôt
-  ne contient **aucun frontend ni code mobile** : les portails, la carte, les
-  widgets et les quatre applications du cahier des charges existent côté
-  endpoints, pas côté écrans.
+- **complets et couverts par des tests d'intégration** : modules 1 (biens), 2
+  (propriétaires), 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16 et 17 ;
+- **socle API uniquement** : module 14 (mobile). Le dépôt ne contient
+  **aucun frontend ni code mobile** : les portails, la carte, les widgets et
+  les quatre applications du cahier des charges existent côté endpoints, pas
+  côté écrans.
 
-Suite de tests : 64 tests d'intégration, tous verts.
+Le module 1 couvre désormais aussi les vidéos de galerie, la visite 360°,
+les filtres propriétaire/gestionnaire/disponibilité/tags, les recherches
+favorites, l'export CSV, le rapport d'évaluation PDF et l'historique
+consolidé. Le module 2 couvre la signature électronique du mandat avec dossier
+de preuve et la synthèse financière par bien. Le module 15 couvre le cycle de
+vie complet des contrats, sinistres et attestations.
+
+Suite de tests : 89 tests d'intégration, tous verts.
 
 ```bash
 cd backend
 python -m unittest discover -s tests
 ```
+
+## Module 1 — Biens immobiliers
+
+Le module biens ajoute :
+
+- CRUD complet, 12 types de biens, 6 statuts, référence auto-générée,
+  géolocalisation, surfaces, pièces, étages, année, chauffage, DPE/GES,
+  équipements, description, tags et catégories ;
+- galerie photos/vidéos avec upload multiple, compression des images,
+  photo principale, gestion des métadonnées média et visite virtuelle 360° ;
+- recherche multicritère avec filtres type, statut, localisation, prix,
+  surface, pièces, propriétaire, gestionnaire, date de disponibilité et tags ;
+- recherches favorites (`/api/properties/saved-searches`) et exports
+  PDF / Excel / CSV ;
+- évaluation, rapport d'évaluation PDF et historique consolidé (baux,
+  loyers, tickets de maintenance).
+
+## Module 2 — Propriétaires
+
+Le module propriétaires ajoute :
+
+- fiche personne physique / morale, coordonnées, IBAN, fiscalité, SIRET,
+  documents numérisés ;
+- portefeuille de biens, mandats (gestion / vente / recherche) avec
+  renouvellement, préavis et alertes d'expiration ;
+- **signature électronique réelle** du mandat avec consentement, empreinte
+  SHA-256, horodatage, IP, user-agent et dossier de preuve PDF téléchargeable ;
+- comptabilité propriétaire (solde, relevé mensuel/trimestriel/annuel PDF) et
+  **synthèse financière par bien** ;
+- portail propriétaire JWT (dashboard, revenus/charges, documents, messagerie,
+  déclaration fiscale).
 
 ## Module 3 — Gestion des locataires
 
@@ -175,7 +208,14 @@ L'API expose un socle mobile pour les applications gestionnaire, locataire, prop
 
 ## Module 15 — Assurances et sinistres
 
-Contrats PNO, MRH, GLI, responsabilité civile et copropriété (`/api/insurance/contracts`), demandes d'attestations, déclarations et suivi des sinistres avec preuves (`/api/insurance/claims`), ainsi qu'un reporting échéances et indemnisation (`/api/insurance/reporting`). Les opérations sont protégées par les droits RBAC existants.
+Contrats PNO, MRH, GLI, responsabilité civile et copropriété avec CRUD complet
+(`/api/insurance/contracts`), cycle de vie des sinistres
+(`/api/insurance/claims` — expert, n° dossier, dates clés, indemnisation
+proposée/reçue, travaux de remise en état), suivi des attestations
+(demande, mise à jour, relance, nombre de relances, validité) et reporting
+(mesures, échéances 30 jours, sinistres ouverts, indemnités, attestations
+en attente/expirant). Les listes sont paginées et cloisonnées par société /
+agence. Les opérations sont protégées par les droits RBAC existants.
 
 ## Module 16 — Intelligence artificielle et automatisation
 
@@ -485,4 +525,8 @@ Les modules 12 et 13 sont couverts par `tests/test_modules_12_13.py` : rôles pe
 
 Les modules 16 et 17 sont couverts par `tests/test_modules_16_17.py` : prédictions explicables et analyse de marché, chatbot locataire (ticket, suivi, rendez-vous), assistant gestionnaire (recherche, impayés, tickets, échéances, portefeuille, workflow), règles d'automatisation avec idempotence, clés API / OAuth2 / rate limiting / webhooks, catalogue de connecteurs, import CSV avec doublons et export XLSX.
 
-La suite complète comporte **64 tests d'intégration**. Les modules 1 (biens), 2 (propriétaires), 14 (mobile) et 15 (assurances) ne sont pas encore couverts : voir [`AUDIT-MODULES.md`](AUDIT-MODULES.md).
+La suite complète comporte **89 tests d'intégration**. Les modules 1 (biens),
+2 (propriétaires) et 15 (assurances/sinistres) sont désormais couverts par
+`tests/test_module1_2_15_completions.py`. Le seul module encore non couvert
+est le module 14 (mobile, socle API uniquement). Voir
+[`AUDIT-MODULES.md`](AUDIT-MODULES.md).

@@ -2,6 +2,14 @@
 
 Analyse réalisée le 2026-08-29 sur la branche `arena/01a04c7d-gestimmo`.
 
+**Mise à jour du 2026-08-29** : les manques identifiés sur les modules
+existants ont été implémentés (modules 1, 2 et 15 : vidéos, visite 360°,
+filtres, recherches favorites, exports, rapport d'évaluation, historique
+consolidé, signature de mandat avec preuve, synthèse financière par bien,
+cycle de vie des sinistres et attestations). La suite passe de 64 à
+**89 tests d'intégration verts**. Les nouvelles sections 18+ ci-dessous
+restent à traiter.
+
 ---
 
 ## 0. Constat de départ

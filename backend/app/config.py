@@ -109,6 +109,7 @@ class Settings:
     RATE_LIMIT_ENABLED = parse_bool(os.getenv("RATE_LIMIT_ENABLED"), True)
     ALLOWED_ORIGINS = parse_csv_list(os.getenv("ALLOWED_ORIGINS"), ["*"])
     ALLOWED_EXTENSIONS = ["jpg", "jpeg", "png", "webp", "gif"]
+    ALLOWED_VIDEO_EXTENSIONS = ["mp4", "mov", "webm", "m4v"]
     UPLOAD_DIR = os.getenv("UPLOAD_DIR", "uploads")
     PRIVATE_UPLOAD_DIR = os.getenv("PRIVATE_UPLOAD_DIR", "private_uploads")
     BACKUP_DIR = os.getenv("BACKUP_DIR", "backups")

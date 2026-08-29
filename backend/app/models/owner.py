@@ -130,6 +130,17 @@ class Mandate(Base):
     signed_date = Column(Date)
     document_url = Column(String(500))  # Mandat signé
 
+    # Dossier de preuve de signature électronique (aligné sur le module 4)
+    signature_hash = Column(String(64))            # SHA-256 de la preuve signée
+    signature_document_hash = Column(String(64))   # SHA-256 du mandat signé
+    signature_evidence_path = Column(String(700))  # PDF de preuve
+    signature_image_path = Column(String(700))     # Signature manuscrite scannée
+    signature_consent_at = Column(DateTime(timezone=True))
+    signature_ip = Column(String(64))
+    signature_user_agent = Column(String(1000))
+    signature_provider = Column(String(50), default="internal_simple_signature")
+    signature_requested_at = Column(DateTime(timezone=True))
+
     # Notes
     notes = Column(Text)
 

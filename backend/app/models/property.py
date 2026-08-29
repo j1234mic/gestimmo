@@ -80,6 +80,12 @@ class Property(Base):
     entity_id = Column(Integer, index=True)
     agency_id = Column(Integer, index=True)
     portfolio_id = Column(Integer, index=True)
+
+    # Gestionnaire assigné (Utilisateur back-office / agent) et date de
+    # disponibilité effective du bien. Sans FK afin de conserver la
+    # compatibilité avec les installations existantes.
+    manager_id = Column(Integer, index=True)
+    available_from = Column(Date)
     
     # Caractéristiques physiques
     living_area = Column(Float)  # Surface habitable en m²
@@ -128,6 +134,10 @@ class Property(Base):
     
     # Tags et catégories
     tags = Column(JSON, default=list)
+
+    # Visite virtuelle 360° (lien externe, optionnel)
+    virtual_tour_url = Column(String(500))
+    is_360_available = Column(Boolean, default=False)
     
     # Métadonnées
     is_active = Column(Boolean, default=True)
@@ -149,6 +159,7 @@ class PropertyPhoto(Base):
     property_id = Column(Integer, ForeignKey("properties.id", ondelete="CASCADE"))
     url = Column(String(500), nullable=False)
     filename = Column(String(255))
+    media_type = Column(String(20), default="image")  # image | video
     is_main = Column(Boolean, default=False)
     is_360 = Column(Boolean, default=False)
     virtual_tour_url = Column(String(500))
@@ -196,4 +207,20 @@ class PropertyEvaluation(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     
     property = relationship("Property", back_populates="evaluations")
+
+
+class SavedSearch(Base):
+    """Recherche favorite sauvegardée par un utilisateur back-office."""
+
+    __tablename__ = "saved_searches"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, index=True)
+    name = Column(String(255), nullable=False)
+    criteria = Column(JSON, default=dict)
+    entity_id = Column(Integer)
+    agency_id = Column(Integer)
+    portfolio_id = Column(Integer)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
