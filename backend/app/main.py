@@ -38,6 +38,9 @@ from app.routes.mobile_insurance import router as mobile_insurance_router
 from app.routes.ai_automation import router as ai_router, tenant_router as tenant_ai_router
 from app.routes.integrations import router as integrations_router, external_router as external_api_router
 from app.routes import owner_portal, communication
+# Architecture hexagonale : routeurs v2 (Properties / Owners).
+from app.hexagon.web.property_router import router as properties_v2_router
+from app.hexagon.web.owner_router import router as owners_v2_router
 from app.config import configure_logging, settings
 from app.database import init_db, SessionLocal
 
@@ -125,6 +128,11 @@ app.include_router(external_api_router)
 # Routeurs du portail propriétaire et de la communication
 app.include_router(owner_portal.router)
 app.include_router(communication.router)
+
+# Routeurs hexagonaux (v2) — pilotés par les cas d'usage, sans logique ORM
+# dans les routes. Ils coexistent avec les routeurs historiques.
+app.include_router(properties_v2_router)
+app.include_router(owners_v2_router)
 
 # Seuls les médias publics historiques sont servis statiquement. Les dossiers
 # locataires sont conservés dans PRIVATE_UPLOAD_DIR et passent par des routes
