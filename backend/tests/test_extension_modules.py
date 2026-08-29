@@ -492,6 +492,10 @@ class ExtensionModulesTest(unittest.TestCase):
         self.assertEqual(detail.status_code, 200)
         self.assertEqual(detail.json()["data"]["title"], "Appartement extension")
 
+        agent_map = self.client.get("/api/public-portal/map")
+        self.assertEqual(agent_map.status_code, 200)
+        self.assertEqual(agent_map.json()["total"], 0)
+
         agents = self.client.get("/api/public-portal/agents")
         self.assertEqual(agents.json()["total"], 1)
         testimonials = self.client.get("/api/public-portal/testimonials")

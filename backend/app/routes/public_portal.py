@@ -188,6 +188,33 @@ def public_property_detail(property_id: str, db: Session = Depends(get_db)):
     return {"data": _public_property(row, with_details=True)}
 
 
+@router.get("/map")
+def public_property_map(
+    city: Optional[str] = None,
+    type: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    q = db.query(Property).filter(
+        Property.is_active.is_(True),
+        Property.status.in_([PropertyStatus.AVAILABLE, PropertyStatus.FOR_SALE, PropertyStatus.RESERVED]),
+    )
+    if city:
+        q = q.filter(Property.city.ilike(f"%{city}%"))
+    if type:
+        q = q.filter(Property.type == type)
+    rows = q.all()
+    features = []
+    for r in rows:
+        if r.latitude is None or r.longitude is None:
+            continue
+        features.append({
+            "type": "Feature",
+            "geometry": {"type": "Point", "coordinates": [r.longitude, r.latitude]},
+            "properties": _public_property(r),
+        })
+    return {"type": "FeatureCollection", "features": features, "total": len(features)}
+
+
 @router.get("/agents")
 def public_agents(db: Session = Depends(get_db)):
     rows = db.query(PublicAgent).filter(PublicAgent.active.is_(True)).order_by(PublicAgent.order, PublicAgent.id).all()
