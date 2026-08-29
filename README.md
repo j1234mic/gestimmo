@@ -311,29 +311,58 @@ docker compose up --build
 
 L'API est ensuite disponible sur `http://localhost:8000` et sa documentation OpenAPI sur `http://localhost:8000/docs`.
 
+Le conteneur joint la base par le nom de service `postgres`, quel que soit le
+`DATABASE_URL` de `backend/.env` : ce dernier ne pilote qu'un `uvicorn` lancé
+sur la machine hôte. Pour viser une base extérieure au compose, définissez
+`DATABASE_URL_DOCKER`.
+
 Les tables absentes sont créées au démarrage (`AUTO_CREATE_TABLES=true`). Pour une base déjà exploitée en production, prévoir une migration SQL/Alembic avant de désactiver cette option.
 
 ## Démarrage local
 
 ```bash
 cd backend
-cp .env.example .env   # puis adapter SECRET_KEY et DATABASE_URL
+cp .env.example .env
 python -m venv .venv
 . .venv/bin/activate
 pip install -r requirements.txt
-# Hors Docker, pointez vers localhost plutôt que l'hôte `postgres` :
-export DATABASE_URL='postgresql://immo_user:immo_password_2024@localhost:5432/immo_db'
+
+# Base de données : le service docker-compose publie le port 5432 sur l'hôte.
+docker compose up -d postgres
+
+# Génère SECRET_KEY et SECURE_ID_KEY dans .env, et aligne l'hôte de
+# DATABASE_URL sur localhost puisque l'API tourne hors Docker :
+python scripts/init_env.py --db-host localhost
+
 uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
-Les variables de `backend/.env` sont chargées automatiquement (`python-dotenv`). Docker Compose lit le même fichier via `env_file`.
+`python scripts/init_env.py --check` audite `backend/.env` sans rien écrire. Le
+script est idempotent : il ne complète que les clés manquantes et n'écrase
+jamais une valeur déjà présente.
+
+Les variables de `backend/.env` sont chargées automatiquement (`python-dotenv`,
+sans écraser une variable déjà exportée par le shell ou par Docker). Docker
+Compose lit le même fichier via `env_file`.
+
+### Avertissements au démarrage
+
+Deux avertissements signalent un `backend/.env` incomplet. Ni l'un ni l'autre
+n'empêche le démarrage, mais chacun a une conséquence réelle :
+
+| Avertissement | Cause | Correctif |
+|---|---|---|
+| `DATABASE_URL cible l'hôte Docker « postgres » mais l'API tourne hors Docker…` | `DATABASE_URL` reprend le nom du service docker-compose (`postgres`), résoluble uniquement dans le réseau Docker. L'API le remappe vers `localhost` pour pouvoir démarrer. | `python scripts/init_env.py --db-host localhost`, puis `docker compose up -d postgres` |
+| `SECURE_ID_KEY non configurée : une clé éphémère est générée…` | Aucune clé Fernet dans `.env` : une clé jetable est fabriquée au démarrage et les `secure_id` déjà stockés en base deviennent illisibles au redémarrage suivant. | `python scripts/init_env.py` écrit une clé stable. Ne la régénérez pas ensuite, sinon les `secure_id` existants sont perdus |
 
 | Variable | Utilité | Valeur par défaut |
 |---|---|---|
 | `ENVIRONMENT` | Masque les codes 2FA dès que la valeur est `production` | `development` |
 | `DEBUG` | Active l'écho SQLAlchemy | `true` |
-| `DATABASE_URL` | URL SQLAlchemy | PostgreSQL local |
+| `DATABASE_URL` | URL SQLAlchemy. Hors Docker, l'hôte doit être `localhost` et non `postgres` | PostgreSQL local |
+| `AUTO_CREATE_TABLES` | Crée au démarrage les tables absentes | `true` |
 | `SECRET_KEY` | Signature JWT et dérivation des secrets | valeur de développement |
+| `SECURE_ID_KEY` | Clé Fernet (44 caractères) chiffrant les `secure_id`. À générer une fois via `scripts/init_env.py` et à conserver stable | vide (clé de session éphémère) |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | Durée par défaut d'un access token | `30` |
 | `REFRESH_TOKEN_EXPIRE_DAYS` | Durée par défaut d'un refresh token | `7` |
 | `RATE_LIMIT_REQUESTS` | Requêtes max par IP sur la fenêtre | `100` |
