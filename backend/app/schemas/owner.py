@@ -133,6 +133,12 @@ class MandateResponse(BaseModel):
         from_attributes = True
 
 
+class MandateSignatureRequest(BaseModel):
+    typed_signature: str = Field(..., min_length=1, max_length=255)
+    signature_image_base64: Optional[str] = None
+    consent: Optional[str] = "Je reconnais avoir lu le mandat et consens à le signer électroniquement."
+
+
 # ============================================
 # PROPERTY-OWNER LINK
 # ============================================

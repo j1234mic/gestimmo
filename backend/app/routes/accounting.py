@@ -9,7 +9,7 @@ from app.database import get_db
 from app.auth import require_read, require_write
 from app.services.accounting_service import (
     create_transaction, generate_statement_pdf, get_transactions, get_balance,
-    get_monthly_summary, delete_transaction
+    get_monthly_summary, delete_transaction, get_owner_property_summary
 
 )
 from app.schemas.accounting import TransactionCreate, TransactionResponse, BalanceResponse
@@ -71,6 +71,16 @@ def get_owner_summary(
 ):
     """Résumé mensuel."""
     return get_monthly_summary(db, owner_id, year, month)
+
+
+@router.get("/owners/{owner_id}/property-summary")
+def get_owner_property_summary_endpoint(
+    owner_id: int,
+    db: Session = Depends(get_db),
+    current_user = Depends(require_read)
+):
+    """Synthèse financière par bien pour un propriétaire."""
+    return get_owner_property_summary(db, owner_id)
 
 
 @router.delete("/transactions/{transaction_id}")

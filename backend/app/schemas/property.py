@@ -41,6 +41,8 @@ class PropertyCreate(BaseModel):
     entity_id: Optional[int] = None
     agency_id: Optional[int] = None
     portfolio_id: Optional[int] = None
+    manager_id: Optional[int] = None
+    available_from: Optional[date] = None
     
     # Caractéristiques
     living_area: Optional[float] = None
@@ -72,6 +74,10 @@ class PropertyCreate(BaseModel):
     
     # Tags
     tags: List[str] = Field(default_factory=list)
+
+    # Visite virtuelle 360° (lien externe)
+    virtual_tour_url: Optional[str] = None
+    is_360_available: bool = False
 
 class PropertyUpdate(PropertyCreate):
     type: Optional[PropertyType] = None
@@ -105,6 +111,7 @@ class PropertyResponse(BaseModel):
     total_floors: Optional[int] = None
     construction_year: Optional[int] = None
     energy_class: Optional[str] = None
+    ges_class: Optional[str] = None
     heating_type: Optional[str] = None
     total_area: Optional[float] = None
     land_area: Optional[float] = None
@@ -113,6 +120,10 @@ class PropertyResponse(BaseModel):
     entity_id: Optional[int] = None
     agency_id: Optional[int] = None
     portfolio_id: Optional[int] = None
+    manager_id: Optional[int] = None
+    available_from: Optional[date] = None
+    virtual_tour_url: Optional[str] = None
+    is_360_available: bool = False
     created_at: Optional[datetime] = None
     
     class Config:
@@ -121,6 +132,8 @@ class PropertyResponse(BaseModel):
 class PhotoResponse(BaseModel):
     id: int
     url: str
+    media_type: Optional[str] = "image"
+    filename: Optional[str] = None
     is_main: bool
     is_360: bool
     virtual_tour_url: Optional[str]
@@ -178,6 +191,9 @@ class PropertyFilter(BaseModel):
     min_rooms: Optional[int] = None
     tags: Optional[List[str]] = None
     available_from: Optional[date] = None
+    available_until: Optional[date] = None
+    owner_id: Optional[int] = None
+    manager_id: Optional[int] = None
     entity_id: Optional[int] = None
     agency_id: Optional[int] = None
     portfolio_id: Optional[int] = None
@@ -185,3 +201,39 @@ class PropertyFilter(BaseModel):
     allowed_agency_ids: Optional[List[int]] = None
     allowed_portfolio_ids: Optional[List[int]] = None
     allowed_scopes: Optional[List[dict]] = None
+
+
+class VirtualTourUpdate(BaseModel):
+    virtual_tour_url: Optional[str] = None
+    is_360_available: bool = True
+
+
+class PhotoUpdate(BaseModel):
+    is_main: Optional[bool] = None
+    is_360: Optional[bool] = None
+    virtual_tour_url: Optional[str] = None
+    order: Optional[int] = None
+    caption: Optional[str] = None
+
+
+class SavedSearchCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=255)
+    criteria: dict = Field(default_factory=dict)
+
+
+class SavedSearchUpdate(BaseModel):
+    name: Optional[str] = None
+    criteria: Optional[dict] = None
+
+
+class SavedSearchResponse(BaseModel):
+    id: int
+    name: str
+    criteria: dict
+    entity_id: Optional[int] = None
+    agency_id: Optional[int] = None
+    portfolio_id: Optional[int] = None
+    created_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True

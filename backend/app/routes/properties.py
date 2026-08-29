@@ -23,11 +23,13 @@ from app.auth import (
 from app.services.property_service import (
     create_property, get_property, get_properties,
     update_property, delete_property, get_property_statistics,
-    add_evaluation
+    add_evaluation, list_saved_searches, create_saved_search,
+    update_saved_search, delete_saved_search
 )
 from app.schemas.property import (
     PropertyCreate, PropertyUpdate, PropertyResponse,
-    PropertyDetailResponse, PropertyFilter
+    PropertyDetailResponse, PropertyFilter, SavedSearchCreate,
+    SavedSearchUpdate, SavedSearchResponse, VirtualTourUpdate, PhotoUpdate
 )
 from app.config import settings
 from app.utils.logger import security_logger
@@ -119,6 +121,11 @@ def list_properties(
     entity_id: Optional[int] = Query(None),
     agency_id: Optional[int] = Query(None),
     portfolio_id: Optional[int] = Query(None),
+    owner_id: Optional[int] = Query(None),
+    manager_id: Optional[int] = Query(None),
+    tags: Optional[List[str]] = Query(None),
+    available_from: Optional[date] = Query(None),
+    available_until: Optional[date] = Query(None),
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
@@ -148,6 +155,11 @@ def list_properties(
         entity_id=entity_id,
         agency_id=agency_id,
         portfolio_id=portfolio_id,
+        owner_id=owner_id,
+        manager_id=manager_id,
+        tags=tags,
+        available_from=available_from,
+        available_until=available_until,
     )
     if current_user and getattr(current_user, "db_id", None) is not None and not _has_global_property_scope(current_user):
         if entity_id is not None and entity_id not in current_user.organization_ids:
@@ -179,6 +191,58 @@ def get_statistics(
 ):
     """Statistiques globales."""
     return get_property_statistics(db)
+
+
+# ============================================
+# RECHERCHES FAVORITES
+# ============================================
+@router.get("/saved-searches")
+def list_saved_search_endpoint(
+    db: Session = Depends(get_db),
+    current_user = Depends(require_read)
+):
+    """Lister les recherches favorites de l'utilisateur connecté."""
+    rows = list_saved_searches(db, current_user.db_id or 0)
+    return {"data": [SavedSearchResponse.model_validate(r).model_dump() for r in rows], "total": len(rows)}
+
+
+@router.post("/saved-searches", response_model=SavedSearchResponse, status_code=201)
+def create_saved_search_endpoint(
+    data: SavedSearchCreate,
+    db: Session = Depends(get_db),
+    current_user = Depends(require_write)
+):
+    """Sauvegarder une recherche favorite."""
+    scope = {"entity_id": None, "agency_id": None, "portfolio_id": None}
+    if current_user.db_id is not None and hasattr(current_user, "organization_ids") and current_user.organization_ids:
+        scope["entity_id"] = current_user.organization_ids[0]
+    return create_saved_search(db, current_user.db_id or 0, data, scope)
+
+
+@router.put("/saved-searches/{search_id}", response_model=SavedSearchResponse)
+def update_saved_search_endpoint(
+    search_id: int,
+    data: SavedSearchUpdate,
+    db: Session = Depends(get_db),
+    current_user = Depends(require_write)
+):
+    """Modifier une recherche favorite."""
+    row = update_saved_search(db, current_user.db_id or 0, search_id, data)
+    if not row:
+        raise HTTPException(status_code=404, detail="Recherche favorite non trouvée")
+    return row
+
+
+@router.delete("/saved-searches/{search_id}")
+def delete_saved_search_endpoint(
+    search_id: int,
+    db: Session = Depends(get_db),
+    current_user = Depends(require_write)
+):
+    """Supprimer une recherche favorite."""
+    if not delete_saved_search(db, current_user.db_id or 0, search_id):
+        raise HTTPException(status_code=404, detail="Recherche favorite non trouvée")
+    return {"message": "Recherche favorite supprimée", "search_id": search_id}
 
 
 # ============================================
@@ -277,29 +341,31 @@ async def upload_property_photos(
     property_id: int,
     files: List[UploadFile] = File(...),
     is_main: Optional[bool] = False,
+    is_360: Optional[bool] = False,
+    virtual_tour_url: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user = Depends(require_write)
 ):
-    """Uploader des photos avec compression et gestion de la photo principale."""
+    """Uploader des photos/vidéos avec compression et gestion de la photo principale."""
     property_obj = get_property(db, property_id)
     if not property_obj:
         raise HTTPException(status_code=404, detail="Bien non trouvé")
     if not _property_in_scope(current_user, property_obj):
         raise HTTPException(status_code=403, detail="Bien hors périmètre")
 
-    # Vérifier les extensions
+    # Vérifier les extensions (images + vidéos)
     for file in files:
         ext = file.filename.split('.')[-1].lower()
-        if ext not in settings.ALLOWED_EXTENSIONS:
+        if ext not in settings.ALLOWED_EXTENSIONS and ext not in settings.ALLOWED_VIDEO_EXTENSIONS:
             raise HTTPException(status_code=400, detail=f"Extension non autorisée: {ext}")
 
-    # Limiter à 10 photos max
+    # Limiter à 10 médias max
     existing_count = db.query(PropertyPhoto).filter(
         PropertyPhoto.property_id == property_id
     ).count()
     
     if existing_count + len(files) > 10:
-        raise HTTPException(status_code=400, detail="Maximum 10 photos par bien")
+        raise HTTPException(status_code=400, detail="Maximum 10 médias par bien")
 
     upload_dir = os.path.join(settings.upload_dir_path, str(property_id))
     os.makedirs(upload_dir, exist_ok=True)
@@ -312,12 +378,14 @@ async def upload_property_photos(
         ).update({"is_main": False})
 
     results = []
+    image_exts = set(settings.ALLOWED_EXTENSIONS)
     for idx, file in enumerate(files):
         ext = file.filename.split('.')[-1].lower()
+        media_type = "image" if ext in image_exts else "video"
         filename = f"{uuid.uuid4()}.{ext}"
         file_path = os.path.join(upload_dir, filename)
 
-        # Lire et compresser l'image
+        # Lire et compresser l'image (les vidéos sont stockées en l'état)
         content = await file.read()
         if len(content) > settings.MAX_UPLOAD_SIZE:
             raise HTTPException(
@@ -325,51 +393,63 @@ async def upload_property_photos(
                 detail=f"Fichier trop volumineux (max {settings.MAX_UPLOAD_SIZE} octets)",
             )
 
-        try:
-            from PIL import Image
-            import io
-            
-            # Compression
-            img = Image.open(io.BytesIO(content))
-            
-            # Redimensionner si trop grand (max 1920px)
-            max_size = 1920
-            if img.width > max_size or img.height > max_size:
-                img.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
-            
-            # Sauvegarder avec optimisation
-            if ext in ['jpg', 'jpeg']:
-                img.save(file_path, 'JPEG', quality=80, optimize=True)
-            elif ext == 'png':
-                img.save(file_path, 'PNG', optimize=True)
-            elif ext == 'webp':
-                img.save(file_path, 'WEBP', quality=80)
-            else:
-                # Format original sans compression
+        if media_type == "image":
+            try:
+                from PIL import Image
+                import io
+
+                # Compression
+                img = Image.open(io.BytesIO(content))
+
+                # Redimensionner si trop grand (max 1920px)
+                max_size = 1920
+                if img.width > max_size or img.height > max_size:
+                    img.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
+
+                # Sauvegarder avec optimisation
+                if ext in ['jpg', 'jpeg']:
+                    img.save(file_path, 'JPEG', quality=80, optimize=True)
+                elif ext == 'png':
+                    img.save(file_path, 'PNG', optimize=True)
+                elif ext == 'webp':
+                    img.save(file_path, 'WEBP', quality=80)
+                else:
+                    # Format original sans compression
+                    async with aiofiles.open(file_path, 'wb') as f:
+                        await f.write(content)
+
+            except ImportError:
+                # Pillow non installé, sauvegarder sans compression
                 async with aiofiles.open(file_path, 'wb') as f:
                     await f.write(content)
-                
-        except ImportError:
-            # Pillow non installé, sauvegarder sans compression
+        else:
             async with aiofiles.open(file_path, 'wb') as f:
                 await f.write(content)
 
         # Créer l'entrée en base
+        current_is_360 = bool(is_360 and idx == 0)
+        current_virtual_tour = virtual_tour_url if (virtual_tour_url and idx == 0) else None
         photo = PropertyPhoto(
             property_id=property_id,
             url=f"/uploads/{property_id}/{filename}",
             filename=filename,
+            media_type=media_type,
             is_main=is_main and idx == 0,  # Première photo = principale si is_main=True
+            is_360=current_is_360,
+            virtual_tour_url=current_virtual_tour,
             order=existing_count + idx
         )
         db.add(photo)
         db.flush()
-        
+
         results.append({
             "id": photo.id,
             "filename": filename,
             "url": photo.url,
-            "is_main": photo.is_main
+            "media_type": media_type,
+            "is_main": photo.is_main,
+            "is_360": photo.is_360,
+            "virtual_tour_url": photo.virtual_tour_url,
         })
 
     db.commit()
@@ -402,6 +482,92 @@ def set_main_photo(
     db.commit()
     
     return {"message": "Photo principale définie", "photo_id": photo_id}
+
+
+@router.put("/{property_id}/photos/{photo_id}")
+def update_photo_metadata(
+    property_id: int,
+    photo_id: int,
+    data: PhotoUpdate,
+    db: Session = Depends(get_db),
+    current_user = Depends(require_write)
+):
+    """Mettre à jour les métadonnées d'un média (principale, 360°, visite virtuelle, ordre)."""
+    property_obj = get_property(db, property_id)
+    if not property_obj:
+        raise HTTPException(status_code=404, detail="Bien non trouvé")
+    if not _property_in_scope(current_user, property_obj):
+        raise HTTPException(status_code=403, detail="Bien hors périmètre")
+
+    photo = db.query(PropertyPhoto).filter(
+        PropertyPhoto.id == photo_id,
+        PropertyPhoto.property_id == property_id
+    ).first()
+    if not photo:
+        raise HTTPException(status_code=404, detail="Média non trouvé")
+
+    if data.is_main is not None and data.is_main:
+        db.query(PropertyPhoto).filter(
+            PropertyPhoto.property_id == property_id,
+            PropertyPhoto.is_main == True
+        ).update({"is_main": False})
+    if data.is_main is not None:
+        photo.is_main = data.is_main
+    if data.is_360 is not None:
+        photo.is_360 = data.is_360
+    if data.virtual_tour_url is not None:
+        photo.virtual_tour_url = data.virtual_tour_url
+    if data.order is not None:
+        photo.order = data.order
+
+    db.commit()
+    db.refresh(photo)
+    return {
+        "id": photo.id,
+        "url": photo.url,
+        "media_type": photo.media_type,
+        "filename": photo.filename,
+        "is_main": photo.is_main,
+        "is_360": photo.is_360,
+        "virtual_tour_url": photo.virtual_tour_url,
+        "order": photo.order,
+    }
+
+
+# ============================================
+# VISITE VIRTUELLE 360° - niveau bien
+# ============================================
+@router.put("/{property_id}/virtual-tour")
+def set_property_virtual_tour(
+    property_id: int,
+    data: VirtualTourUpdate,
+    db: Session = Depends(get_db),
+    current_user = Depends(require_write)
+):
+    """Renseigner le lien de visite virtuelle 360° d'un bien."""
+    property_obj = get_property(db, property_id)
+    if not property_obj:
+        raise HTTPException(status_code=404, detail="Bien non trouvé")
+    if not _property_in_scope(current_user, property_obj):
+        raise HTTPException(status_code=403, detail="Bien hors périmètre")
+
+    if data.virtual_tour_url is not None:
+        property_obj.virtual_tour_url = data.virtual_tour_url
+    if data.is_360_available is not None:
+        property_obj.is_360_available = data.is_360_available
+
+    if data.virtual_tour_url:
+        db.query(PropertyPhoto).filter(
+            PropertyPhoto.property_id == property_id
+        ).update({"is_360": True, "virtual_tour_url": data.virtual_tour_url})
+
+    db.commit()
+    db.refresh(property_obj)
+    return {
+        "property_id": property_obj.id,
+        "virtual_tour_url": property_obj.virtual_tour_url,
+        "is_360_available": property_obj.is_360_available,
+    }
 
 
 @router.delete("/{property_id}/photos/{photo_id}")

@@ -2,14 +2,18 @@
 
 import uuid
 from sqlalchemy.orm import Session
-from sqlalchemy import or_, and_
+from sqlalchemy import or_, and_, cast, String
 from typing import List, Optional
 from datetime import datetime, date
 from app.models.property import (
     Property, PropertyPhoto, PropertyDocument,
-    PropertyHistory, PropertyEvaluation, PropertyStatus, PropertyType
+    PropertyHistory, PropertyEvaluation, PropertyStatus, PropertyType, SavedSearch
 )
-from app.schemas.property import PropertyCreate, PropertyUpdate, PropertyFilter, PropertyResponse
+from app.models.owner import PropertyOwner
+from app.schemas.property import (
+    PropertyCreate, PropertyUpdate, PropertyFilter, PropertyResponse,
+    SavedSearchCreate, SavedSearchUpdate
+)
 from app.hexagon.infrastructure.security.id_cipher import encrypt_id
 
 
@@ -88,6 +92,12 @@ def get_properties(
         query = query.filter(Property.agency_id == filters.agency_id)
     if filters.portfolio_id is not None:
         query = query.filter(Property.portfolio_id == filters.portfolio_id)
+    if filters.owner_id is not None:
+        query = query.join(PropertyOwner, PropertyOwner.property_id == Property.id).filter(
+            PropertyOwner.owner_id == filters.owner_id
+        )
+    if filters.manager_id is not None:
+        query = query.filter(Property.manager_id == filters.manager_id)
     if filters.allowed_scopes is not None:
         scope_clauses = []
         for scope in filters.allowed_scopes:
@@ -175,6 +185,22 @@ def get_properties(
     if filters.min_rooms:
         query = query.filter(Property.rooms >= filters.min_rooms)
     
+    # Filtres par tags (au moins un des tags sélectionnés)
+    if filters.tags:
+        query = query.filter(or_(*[
+            cast(Property.tags, String).ilike(f"%{tag}%") for tag in filters.tags
+        ]))
+
+    # Disponibilité : disponible à partir d'une date / disponible jusqu'à une date
+    if filters.available_from is not None:
+        query = query.filter(
+            or_(Property.available_from.is_(None), Property.available_from <= filters.available_from)
+        )
+    if filters.available_until is not None:
+        query = query.filter(
+            or_(Property.available_from.is_(None), Property.available_from <= filters.available_until)
+        )
+
     total = query.count()
     properties = query.offset(skip).limit(limit).all()
     
@@ -291,6 +317,44 @@ def add_evaluation(
     
     db.commit()
     return evaluation
+
+
+def list_saved_searches(db: Session, user_id: int) -> list:
+    return db.query(SavedSearch).filter(SavedSearch.user_id == user_id).order_by(SavedSearch.created_at.desc()).all()
+
+
+def create_saved_search(db: Session, user_id: int, data: SavedSearchCreate, scopes=None) -> SavedSearch:
+    row = SavedSearch(user_id=user_id, name=data.name, criteria=data.criteria)
+    if scopes:
+        row.entity_id = scopes.get("entity_id")
+        row.agency_id = scopes.get("agency_id")
+        row.portfolio_id = scopes.get("portfolio_id")
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def update_saved_search(db: Session, user_id: int, search_id: int, data: SavedSearchUpdate):
+    row = db.query(SavedSearch).filter(SavedSearch.id == search_id, SavedSearch.user_id == user_id).first()
+    if not row:
+        return None
+    if data.name is not None:
+        row.name = data.name
+    if data.criteria is not None:
+        row.criteria = data.criteria
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def delete_saved_search(db: Session, user_id: int, search_id: int) -> bool:
+    row = db.query(SavedSearch).filter(SavedSearch.id == search_id, SavedSearch.user_id == user_id).first()
+    if not row:
+        return False
+    db.delete(row)
+    db.commit()
+    return True
 
 
 def get_property_statistics(db: Session):
