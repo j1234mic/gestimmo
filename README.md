@@ -2,6 +2,30 @@
 
 API FastAPI couvrant la gestion des biens, des propriétaires et des locataires.
 
+## État d'avancement des 17 modules
+
+Le détail complet, module par module et avec les preuves d'exécution, est dans
+[`AUDIT-MODULES.md`](AUDIT-MODULES.md). En synthèse :
+
+- **complets et couverts par des tests d'intégration** : modules 3, 4, 5, 6, 7,
+  8, 9, 10, 11, 12, 13, 16 et 17 ;
+- **inachevés et sans aucun test** : modules 1 (biens) et 2 (propriétaires) —
+  vidéos de galerie, visite 360°, recherches favorites, filtres par
+  propriétaire/gestionnaire, export CSV et rapport d'évaluation PDF manquants
+  pour le premier ; signature de mandat réduite à un changement de statut et
+  absence de synthèse financière par bien pour le second ;
+- **socle API uniquement** : modules 14 (mobile) et 15 (assurances). Le dépôt
+  ne contient **aucun frontend ni code mobile** : les portails, la carte, les
+  widgets et les quatre applications du cahier des charges existent côté
+  endpoints, pas côté écrans.
+
+Suite de tests : 64 tests d'intégration, tous verts.
+
+```bash
+cd backend
+python -m unittest discover -s tests
+```
+
 ## Module 3 — Gestion des locataires
 
 Le module locataire comprend :
@@ -457,4 +481,8 @@ Le module 8 (CRM et gestion commerciale) est couvert par `tests/test_crm_module.
 
 Le module 9 (tableau de bord et reporting) est couvert par `tests/test_reporting_module.py` : KPIs temps réel et graphiques, widgets avec réorganisation drag & drop, les neuf rapports prédéfinis, les quatre formats d'export (PDF vérifié avec pypdf, Excel, CSV, Word), générateur de rapports personnalisés (filtres coercés vers les enums/dates, groupements avec agrégats), partage par jeton, planification d'exécution et alertes à seuils avec anti-spam et prise de connaissance.
 
-Les modules 12 et 13 sont couverts par `tests/test_modules_12_13.py` : rôles personnalisés et cloisonnement, désactivation et historique, verrouillage et 2FA, sociétés/agences, paramètres, indices, audit, backup SQLite et portabilité RGPD, carte GeoJSON, POI, score de localisation, zones/statistiques, temps de trajet, visites et optimisation de tournée. La suite complète comporte 49 tests d'intégration.
+Les modules 12 et 13 sont couverts par `tests/test_modules_12_13.py` : rôles personnalisés et cloisonnement, désactivation et historique, verrouillage et 2FA, sociétés/agences, paramètres, indices, audit, backup SQLite et portabilité RGPD, carte GeoJSON, POI, score de localisation, zones/statistiques, temps de trajet, visites et optimisation de tournée.
+
+Les modules 16 et 17 sont couverts par `tests/test_modules_16_17.py` : prédictions explicables et analyse de marché, chatbot locataire (ticket, suivi, rendez-vous), assistant gestionnaire (recherche, impayés, tickets, échéances, portefeuille, workflow), règles d'automatisation avec idempotence, clés API / OAuth2 / rate limiting / webhooks, catalogue de connecteurs, import CSV avec doublons et export XLSX.
+
+La suite complète comporte **64 tests d'intégration**. Les modules 1 (biens), 2 (propriétaires), 14 (mobile) et 15 (assurances) ne sont pas encore couverts : voir [`AUDIT-MODULES.md`](AUDIT-MODULES.md).

@@ -280,6 +280,106 @@ class FinanceMaintenanceTest(unittest.TestCase):
         self.assertEqual(export.json()["format"], "fec")
         self.assertIn("JournalCode", export.json()["content"])
 
+    def test_module5_export_scope_owner_and_property(self):
+        """Le périmètre d'un export comptable doit réellement filtrer le journal.
+
+        Un export « par propriétaire » ou « par bien » qui restituerait
+        l'intégralité du journal est inutilisable en comptabilité de gérance :
+        chaque périmètre ne doit contenir que ses propres écritures.
+        """
+        first = self.create_property()
+        second_response = self.client.post(
+            "/api/properties/",
+            headers=self.headers,
+            json={
+                "type": "house",
+                "title": "Maison témoin",
+                "address": "2 rue du Test",
+                "postal_code": "69001",
+                "city": "Lyon",
+            },
+        )
+        self.assertEqual(second_response.status_code, 201, second_response.text)
+        second = second_response.json()["id"]
+
+        owner = self.client.post(
+            "/api/owners/",
+            headers=self.headers,
+            json={
+                "owner_type": "individual",
+                "first_name": "Nina",
+                "last_name": "Roche",
+                "email": "nina.roche@example.fr",
+            },
+        )
+        self.assertEqual(owner.status_code, 201, owner.text)
+        owner_id = owner.json()["id"]
+        # Le propriétaire ne détient que le premier bien.
+        link = self.client.post(
+            f"/api/owners/{owner_id}/properties",
+            headers=self.headers,
+            json={"property_id": first},
+        )
+        self.assertEqual(link.status_code, 200, link.text)
+
+        self.client.post("/api/finance/accounts/standard", headers=self.headers)
+        accounts = self.client.get("/api/finance/accounts", headers=self.headers).json()
+        account_list = accounts["data"] if isinstance(accounts, dict) else accounts
+        debit_account, credit_account = account_list[0]["id"], account_list[1]["id"]
+        for property_id, label in ((first, "Loyer bien un"), (second, "Loyer bien deux")):
+            entry = self.client.post(
+                "/api/finance/journal-entries",
+                headers=self.headers,
+                json={
+                    "entry_date": "2024-06-05",
+                    "label": label,
+                    "property_id": property_id,
+                    "lines": [
+                        {"account_id": debit_account, "debit": 1000, "credit": 0},
+                        {"account_id": credit_account, "debit": 0, "credit": 1000},
+                    ],
+                },
+            )
+            self.assertEqual(entry.status_code, 201, entry.text)
+
+        def export(entity_type, entity_id=None):
+            payload = {
+                "export_format": "fec",
+                "period_start": "2024-01-01",
+                "period_end": "2024-12-31",
+                "entity_type": entity_type,
+            }
+            if entity_id is not None:
+                payload["entity_id"] = entity_id
+            response = self.client.post("/api/finance/exports", headers=self.headers, json=payload)
+            self.assertEqual(response.status_code, 200, response.text)
+            body = response.json()
+            lines = [line for line in body["content"].splitlines()[1:] if line.strip()]
+            return body["entry_count"], lines
+
+        global_count, _ = export("global")
+        self.assertEqual(global_count, 4)  # 2 écritures x 2 lignes
+
+        first_count, first_lines = export("property", first)
+        self.assertEqual(first_count, 2)
+        self.assertTrue(any("bien un" in line for line in first_lines))
+        self.assertFalse(any("bien deux" in line for line in first_lines))
+
+        second_count, second_lines = export("property", second)
+        self.assertEqual(second_count, 2)
+        self.assertTrue(any("bien deux" in line for line in second_lines))
+        self.assertFalse(any("bien un" in line for line in second_lines))
+
+        owner_count, owner_lines = export("owner", owner_id)
+        self.assertEqual(owner_count, 2)
+        self.assertTrue(any("bien un" in line for line in owner_lines))
+        self.assertFalse(any("bien deux" in line for line in owner_lines))
+
+        # Un propriétaire sans bien ne doit pas hériter de tout le journal.
+        empty_count, empty_lines = export("owner", 999999)
+        self.assertEqual(empty_count, 0)
+        self.assertEqual(empty_lines, [])
+
     def test_module6_ticket_workflow_preventive_project_equipment(self):
         property_id = self.create_property()
         tenant_id, lease_id = self.create_tenant_and_lease(property_id)
