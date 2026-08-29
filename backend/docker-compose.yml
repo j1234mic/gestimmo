@@ -23,7 +23,11 @@ services:
     env_file:
       - .env
     environment:
-      - DATABASE_URL=${DATABASE_URL:-postgresql://immo_user:immo_password_2024@postgres:5432/immo_db}
+      # Dans le réseau compose, la base est le service `postgres`. On force cet
+      # hôte ici pour qu'un `backend/.env` configuré pour un uvicorn lancé sur
+      # l'hôte (DATABASE_URL=…@localhost…) ne casse pas le conteneur.
+      # `environment` prime sur `env_file` ; surchargez via DATABASE_URL_DOCKER.
+      - DATABASE_URL=${DATABASE_URL_DOCKER:-postgresql://immo_user:immo_password_2024@postgres:5432/immo_db}
       - AUTO_CREATE_TABLES=${AUTO_CREATE_TABLES:-true}
       - DEBUG=${DEBUG:-false}
       - ENVIRONMENT=${ENVIRONMENT:-production}
