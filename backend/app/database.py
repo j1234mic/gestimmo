@@ -24,6 +24,25 @@ def get_db():
         db.close()
 
 
+def _add_column_if_missing(connection, table: str, column_name: str,
+                           column_type: str, nullable: bool = True,
+                           index: bool = False, default: str | None = None):
+    """Ajoute une colonne à une table existante si elle est absente."""
+    inspector = inspect(engine)
+    if table not in inspector.get_table_names():
+        return
+    existing = {column["name"] for column in inspector.get_columns(table)}
+    if column_name not in existing:
+        ddl = f"ALTER TABLE {table} ADD COLUMN {column_name} {column_type}"
+        if not nullable:
+            ddl += " NOT NULL"
+        if default is not None:
+            ddl += f" DEFAULT {default}"
+        connection.execute(text(ddl))
+    if index:
+        connection.execute(text(f"CREATE INDEX IF NOT EXISTS ix_{table}_{column_name} ON {table} ({column_name})"))
+
+
 def _ensure_module_12_13_columns():
     """Migration additive minimale pour la table historique ``properties``.
 
@@ -41,6 +60,39 @@ def _ensure_module_12_13_columns():
             if name not in existing:
                 connection.execute(text(f"ALTER TABLE properties ADD COLUMN {name} INTEGER"))
             connection.execute(text(f"CREATE INDEX IF NOT EXISTS ix_properties_{name} ON properties ({name})"))
+
+
+def _ensure_property_completion_columns():
+    """Colonnes du module 1 : gestionnaire, disponibilité et visite 360°."""
+    with engine.begin() as connection:
+        _add_column_if_missing(connection, "properties", "manager_id", "INTEGER", index=True)
+        _add_column_if_missing(connection, "properties", "available_from", "DATE", index=True)
+        _add_column_if_missing(connection, "properties", "virtual_tour_url", "VARCHAR(500)")
+        _add_column_if_missing(connection, "properties", "is_360_available", "BOOLEAN", index=False, default="0")
+        _add_column_if_missing(connection, "property_photos", "media_type", "VARCHAR(20)", default="'image'")
+
+
+def _ensure_mandate_signature_columns():
+    """Colonnes du dossier de preuve de signature électronique des mandats."""
+    with engine.begin() as connection:
+        for name in ("signature_hash", "signature_document_hash", "signature_ip"):
+            _add_column_if_missing(connection, "mandates", name, "VARCHAR(64)")
+        _add_column_if_missing(connection, "mandates", "signature_evidence_path", "VARCHAR(700)")
+        _add_column_if_missing(connection, "mandates", "signature_image_path", "VARCHAR(700)")
+        _add_column_if_missing(connection, "mandates", "signature_consent_at", "DATETIME")
+        _add_column_if_missing(connection, "mandates", "signature_user_agent", "VARCHAR(1000)")
+        _add_column_if_missing(connection, "mandates", "signature_provider", "VARCHAR(50)", default="'internal_simple_signature'")
+        _add_column_if_missing(connection, "mandates", "signature_requested_at", "DATETIME")
+
+
+def _ensure_insurance_scope_columns():
+    """Colonnes de cloisonnement société/agence pour les assurances."""
+    for table in ("insurance_contracts", "insurance_attestations", "insurance_claims"):
+        with engine.begin() as connection:
+            _add_column_if_missing(connection, table, "entity_id", "INTEGER", index=True)
+            _add_column_if_missing(connection, table, "agency_id", "INTEGER", index=True)
+    with engine.begin() as connection:
+        _add_column_if_missing(connection, "insurance_attestations", "last_reminded_at", "DATETIME")
 
 
 def _backfill_secure_ids():
@@ -83,9 +135,13 @@ def init_db():
     from app.models import finance, maintenance, condo, crm, reporting, communication, ged  # noqa: F401
     from app.models import admin_security, geolocation, insurance  # noqa: F401
     from app.models import ai_automation, integration  # noqa: F401
+    from app.models import extension  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
     _ensure_module_12_13_columns()
+    _ensure_property_completion_columns()
+    _ensure_mandate_signature_columns()
+    _ensure_insurance_scope_columns()
     _backfill_secure_ids()
 
     # Amorçage idempotent des profils prédéfinis et des comptes historiques.

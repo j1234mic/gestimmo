@@ -3,7 +3,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, File, Form
 from sqlalchemy.orm import Session
 from typing import Optional, List
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 import os
 import uuid
 import aiofiles
@@ -15,12 +15,14 @@ from app.models.owner import Owner, PropertyOwner, Mandate
 from app.services.owner_service import (
     create_owner, get_owner, get_owners, update_owner, delete_owner,
     link_property_to_owner, unlink_property_from_owner,
-    create_mandate, get_mandates, delete_mandate
+    create_mandate, get_mandates, delete_mandate, sign_mandate
 )
 from app.schemas.owner import (
     OwnerCreate, OwnerUpdate, OwnerResponse, OwnerDetailResponse,
-    MandateCreate, MandateResponse, PropertyOwnerLink
+    MandateCreate, MandateResponse, MandateSignatureRequest, PropertyOwnerLink
 )
+from fastapi.responses import FileResponse
+from pathlib import Path
 
 router = APIRouter(prefix="/api/owners", tags=["Owners"])
 
@@ -300,24 +302,80 @@ def terminate_mandate(
 
 
 @router.put("/{owner_id}/mandates/{mandate_id}/sign")
-def sign_mandate(
+def sign_mandate_endpoint(
+    owner_id: int,
+    mandate_id: int,
+    data: MandateSignatureRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user = Depends(require_write)
+):
+    """Signer électroniquement un mandat avec dossier de preuve."""
+    try:
+        mandate = sign_mandate(
+            db,
+            owner_id,
+            mandate_id,
+            data,
+            request.client.host if request.client else "unknown",
+            request.headers.get("user-agent", ""),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {
+        "message": "Mandat signé électroniquement",
+        "mandate_id": mandate.id,
+        "date": mandate.signed_date.isoformat() if mandate.signed_date else None,
+        "signature_hash": mandate.signature_hash,
+        "signature_document_hash": mandate.signature_document_hash,
+        "evidence_url": f"/api/owners/{owner_id}/mandates/{mandate.id}/evidence",
+    }
+
+
+@router.post("/{owner_id}/mandates/{mandate_id}/signature-request")
+def request_mandate_signature(
     owner_id: int,
     mandate_id: int,
     db: Session = Depends(get_db),
     current_user = Depends(require_write)
 ):
-    """Signer électroniquement un mandat."""
+    """Préparer une demande de signature (horodatage de la demande)."""
     mandate = db.query(Mandate).filter(
         Mandate.id == mandate_id,
         Mandate.owner_id == owner_id
     ).first()
     if not mandate:
         raise HTTPException(status_code=404, detail="Mandat non trouvé")
-    
-    mandate.signed_date = date.today()
-    mandate.status = "signed"
+    mandate.signature_requested_at = datetime.now(timezone.utc)
+    mandate.signature_provider = "internal_simple_signature"
     db.commit()
-    return {"message": "Mandat signé", "date": mandate.signed_date.isoformat()}
+    return {
+        "message": "Demande de signature enregistrée",
+        "mandate_id": mandate.id,
+        "requested_at": mandate.signature_requested_at.isoformat(),
+    }
+
+
+@router.get("/{owner_id}/mandates/{mandate_id}/evidence")
+def download_mandate_evidence(
+    owner_id: int,
+    mandate_id: int,
+    db: Session = Depends(get_db),
+    current_user = Depends(require_read)
+):
+    """Télécharger le dossier de preuve de signature d'un mandat."""
+    mandate = db.query(Mandate).filter(
+        Mandate.id == mandate_id,
+        Mandate.owner_id == owner_id
+    ).first()
+    if not mandate:
+        raise HTTPException(status_code=404, detail="Mandat non trouvé")
+    if not mandate.signature_evidence_path:
+        raise HTTPException(status_code=404, detail="Aucun dossier de preuve disponible")
+    path = Path(mandate.signature_evidence_path)
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="Fichier de preuve introuvable")
+    return FileResponse(path, media_type="application/pdf", filename=f"preuve-{mandate.reference}.pdf")
 
 
 @router.delete("/{owner_id}/mandates/{mandate_id}")

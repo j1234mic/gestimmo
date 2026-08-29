@@ -35,6 +35,8 @@ from app.routes.ged import router as ged_router
 from app.routes.admin_security import router as admin_security_router, public_router as privacy_router
 from app.routes.geolocation import router as geolocation_router
 from app.routes.mobile_insurance import router as mobile_insurance_router
+from app.routes.extension import router as extension_router
+from app.routes.public_portal import router as public_portal_router
 from app.routes.ai_automation import router as ai_router, tenant_router as tenant_ai_router
 from app.routes.integrations import router as integrations_router, external_router as external_api_router
 from app.routes import owner_portal, communication
@@ -124,6 +126,8 @@ app.include_router(ai_router)
 app.include_router(tenant_ai_router)
 app.include_router(integrations_router)
 app.include_router(external_api_router)
+app.include_router(extension_router)
+app.include_router(public_portal_router)
 
 # Routeurs du portail propriétaire et de la communication
 app.include_router(owner_portal.router)

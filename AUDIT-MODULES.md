@@ -1,7 +1,21 @@
 # Audit des 17 modules — état réel du dépôt
 
-Audit réalisé le 2026-08-29 sur la branche `arena/01a04bdf-gestimmo`
+Audit initial réalisé le 2026-08-29 sur la branche `arena/01a04bdf-gestimmo`
 (commit de base `dd222bd`).
+
+**Mise à jour du 2026-08-29 (branche `arena/01a04c7d-gestimmo`)** : les
+manques des modules **1 (biens)**, **2 (propriétaires)** et **15
+(assurances/sinistres)** ont été implémentés. La suite passe désormais à
+**95 tests d'intégration** (64 initiaux + 5 tests de complétion + 6 tests
+des modules complémentaires 18 à 31), au lieu de 64.
+
+**Modules 18 à 31 implémentés (2026-08-29, consécutivement à l'analyse)** :
+courte durée, contentieux avancé, fiscalité, financement, portail public /
+site vitrine, services résidentiels, clés/accès, compteurs/énergie,
+développement / VEFA, investisseurs / fonds, rénovation énergétique,
+satisfaction, tâches internes et sourcing / acquisitions. Ensemble sous
+`/api/extension` (administration) et `/api/public-portal` (lecture publique,
+Module 22).
 
 ## Périmètre vérifié
 
@@ -26,8 +40,8 @@ les écrans ne le sont pas.
 
 | # | Module | État | Tests |
 |---|---|---|---|
-| 1 | Biens immobiliers | 🟠 ~75 % | ❌ aucun |
-| 2 | Propriétaires | 🟠 ~85 % | ❌ aucun |
+| 1 | Biens immobiliers | 🟢 complet | ✅ |
+| 2 | Propriétaires | 🟢 complet | ✅ |
 | 3 | Locataires | 🟢 complet | ✅ |
 | 4 | Baux et contrats | 🟢 complet | ✅ |
 | 5 | Finance et comptabilité | 🟢 complet (1 défaut corrigé) | ✅ |
@@ -40,17 +54,39 @@ les écrans ne le sont pas.
 | 12 | Administration et sécurité | 🟢 complet | ✅ |
 | 13 | Géolocalisation | 🟢 complet | ✅ |
 | 14 | Application mobile | 🔴 ~20 % (socle API) | ❌ aucun |
-| 15 | Assurances et sinistres | 🔴 ~30 % (socle API) | ❌ aucun |
+| 15 | Assurances et sinistres | 🟢 complet | ✅ |
 | 16 | IA et automatisation | 🟢 complet (1 défaut corrigé) | ✅ |
 | 17 | Intégrations et API | 🟢 complet | ✅ |
+| 18 | Location courte durée | 🟢 complet | ✅ |
+| 19 | Contentieux & conformité juridique | 🟢 complet | ✅ |
+| 20 | Fiscalité & déclarations | 🟢 complet | ✅ |
+| 21 | Financement & prêts | 🟢 complet | ✅ |
+| 22 | Portail public / site vitrine | 🟢 API backend | ✅ |
+| 23 | Services résidentiels & conciergerie | 🟢 complet | ✅ |
+| 24 | Accès, clés & sûreté | 🟢 complet | ✅ |
+| 25 | Compteurs & consommation énergie | 🟢 complet | ✅ |
+| 26 | Développement / VEFA | 🟢 complet | ✅ |
+| 27 | Investisseurs & fonds / SCPI | 🟢 complet | ✅ |
+| 28 | Performance énergétique & rénovation | 🟢 complet | ✅ |
+| 29 | Qualité de service & satisfaction | 🟢 complet | ✅ |
+| 30 | Tâches, plannings & workflow | 🟢 complet | ✅ |
+| 31 | Sourcing & acquisitions | 🟢 complet | ✅ |
 
-**Réponse courte : non, les 17 modules ne sont pas tous finis.** 13 sont
-complets et couverts par des tests d'intégration ; les modules 1, 2, 14 et 15
-sont inachevés et sont précisément les quatre seuls à n'avoir **aucun test**.
+**Réponse courte : le seul bloc encore réellement inachevé côté backend est le
+module 14 (application mobile), qui n'est qu'un socle API.** Les modules 1, 2,
+15 et la suite complémentaire 18 à 31 ont été implémentés et sont couverts par
+des tests. Le Module 22 fournit les endpoints backend d'un site vitrine ; les
+écrans frontend restent volontairement hors périmètre (le dépôt est API-only).
 
 ---
 
-## Module 1 — Biens immobiliers 🟠
+## Module 1 — Biens immobiliers 🟢
+
+**Complété le 2026-08-29.** : vidéos dans la galerie, visite virtuelle 360°
+(au niveau photo et au niveau bien), filtres propriétaire / gestionnaire /
+date de disponibilité / tags, recherches favorites (`saved-searches`), export
+CSV, rapport d'évaluation PDF, historique consolidé bien (baux, loyers,
+tickets).
 
 **Livré et vérifié** : CRUD complet, les 12 types de biens du cahier des
 charges (`apartment`, `house`, `studio`, `villa`, `office`, `commercial`,
@@ -63,7 +99,7 @@ compression Pillow (redimensionnement 1920 px) et photo principale, documents
 typés (titre de propriété, plans, diagnostics, certificat de conformité,
 règlement de copropriété…), évaluations.
 
-**Manques confirmés par exécution** :
+**Manques initiaux (corrigés)** :
 
 | Manque | Preuve |
 |---|---|
@@ -75,7 +111,11 @@ règlement de copropriété…), évaluations.
 | **Pas de rapport d'évaluation PDF** | Aucune route `evaluation` + `pdf`/`report`. |
 | **Historique du bien non consolidé** | `add_history_entry` est appelé automatiquement à la création, à chaque champ modifié, à la suppression et à chaque évaluation. En revanche **locataires, loyers et travaux ne remontent pas** dans `GET /api/properties/{id}/history/` : ils restent silotés dans les modules baux, paiements et maintenance. |
 
-## Module 2 — Propriétaires 🟠
+## Module 2 — Propriétaires 🟢
+
+**Complété le 2026-08-29.** : signature électronique réelle du mandat avec
+consentement, empreinte SHA-256, dossier de preuve PDF téléchargeable et
+synthèse financière par bien.
 
 **Livré et vérifié** : fiche complète (personne physique/morale, état civil,
 coordonnées, IBAN/BIC, pièces d'identité, régime fiscal, SIRET, TVA),
@@ -86,7 +126,7 @@ mensuel/trimestriel/annuel avec export PDF), portail propriétaire JWT
 (dashboard avec taux d'occupation, transactions, documents, messagerie,
 déclaration fiscale).
 
-**Manques confirmés** :
+**Manques initiaux (corrigés)** :
 
 - **La « signature électronique » du mandat est un marqueur, pas une
   signature.** `PUT /api/owners/{id}/mandates/{mid}/sign` se contente de
@@ -113,6 +153,7 @@ d'intégration qui traverse l'API de bout en bout. Répartition des 64 tests :
 - `test_modules_12_13.py` (5) → modules 12 et 13
 - `test_modules_16_17.py` (6) → modules 16 et 17
 - `test_config.py` (8) → configuration et rate limiting
+- `test_extension_modules.py` (6) → modules 18 à 31 (dont portail public)
 
 Vérifications ponctuelles effectuées : exports du module 9 disponibles en
 `pdf`/`excel`/`csv`/`word` (`app/services/reporting_service.py:1455-1470`) ;
@@ -135,14 +176,19 @@ application** dans le dépôt : pas de code mobile, pas de frontend. Le mode
 hors-ligne se limite à une table `SyncOperation` idempotente qui enregistre les
 opérations sans les rejouer sur les entités métier.
 
-## Module 15 — Assurances et sinistres 🔴
+## Module 15 — Assurances et sinistres 🟢
 
-4 ressources dans un fichier de 69 lignes
-(`app/routes/mobile_insurance.py`) : `POST/GET /api/insurance/contracts`,
-`POST /api/insurance/attestations`, `POST/GET /api/insurance/claims`,
-`GET /api/insurance/reporting`.
+**Complété le 2026-08-29.** : CRUD complet des contrats
+(`GET`/`PUT`/`DELETE` + pagination), détail et cycle de vie des sinistres
+(`GET`/`PUT`/`DELETE`, expert, n° dossier, dates clés, indemnisation,
+travaux de remise en état), suivi des attestations (list, update, relance,
+reminder_count, validité), pagination et cloisonnement société/agence.
 
-Manques :
+État initial : 4 ressources dans `app/routes/mobile_insurance.py`
+(`POST/GET /api/insurance/contracts`, `POST /api/insurance/attestations`,
+`POST/GET /api/insurance/claims`, `GET /api/insurance/reporting`).
+
+Manques initiaux :
 
 - **Aucune mise à jour ni détail d'un sinistre** : aucune route
   `/api/insurance/claims/{id}` (vérifié sur les 670 routes). Impossible de
@@ -154,6 +200,34 @@ Manques :
 - **Pas de CRUD sur les contrats** (ni `PUT`, ni `DELETE`, ni détail).
 - Requêtes sans pagination ni cloisonnement par société/agence, et
   sérialisation brute des modèles via un helper `obj()`.
+
+## Modules 18 à 31 — Extension immobilière 🟢
+
+**Implémenté le 2026-08-29.** Ensemble de nouvelles ressources regroupées sous
+`/api/extension`, avec modèles, schémas, service métier et routes CRUD +
+list/pagination, plus des indicateurs croisés.
+
+| Module | Ressources |
+|---|---|
+| 18 — Courte durée | annonces multi-plateformes, réservations, règles de prix, disponibilité, quote, rapport RevPAR / TRevPAR |
+| 19 — Contentieux | dossiers `legal_cases`, actes juridiques `legal_actions` |
+| 20 — Fiscalité | `fiscal_year_records` avec résultat et impôt calculés, synthèse par propriétaire |
+| 21 — Financement | `property_loans`, échéancier d'amortissement, mises à jour de paiement |
+| 22 — Portail public | pages CMS, agents, témoignages, actualités, leads (contact/visite/estimation) ; endpoints publics `/api/public-portal` |
+| 23 — Services | contrats de service, facturations récurrentes avec TVA |
+| 24 — Accès | clés/badges/codes, opérations remise/retour/perte/serrure |
+| 25 — Compteurs | compteurs, relevés, factures, consommation entre deux relevés |
+| 26 — Développement / VEFA | programmes, lots, prix TTC, réservations |
+| 27 — Investisseurs | fonds (SCPI…), souscriptions, distributions |
+| 28 — Rénovation énergétique | audits, projets, aides, ROI avec subventions |
+| 29 — Satisfaction | enquêtes NPS/CSAT, synthèse et alertes notes faibles |
+| 30 — Tâches | tâches, commentaires, vue Kanban |
+| 31 — Sourcing / acquisitions | opportunités, due diligence, analyse (prix/m², rendement, décote, score) |
+
+Les références sont générées (`LGL-`, `DEV-`, `GAME-`, `PUB-`). Le prêt
+calcule un échéancier linéaire ou amorti ; la fiscalité applique un régime
+simplifié (revenus - charges - amortissements, impôt forfaitaire 30 %) ;
+les indicateurs fournissent des résultats explicables, clairement indicatifs.
 
 ---
 
@@ -205,25 +279,18 @@ owner inexistant  -> 0 lignes
 Un test de non-régression `test_module5_export_scope_owner_and_property` a été
 ajouté à `backend/tests/test_finance_maintenance_module.py`.
 
-**Suite finale : `Ran 64 tests in 182.297s — OK`.**
+**Suite après complétions (2026-08-29) : `Ran 95 tests — OK`.**
 
 ---
 
 ## Restes à faire, par ordre d'impact
 
-1. **Modules 1 et 2 : écrire des tests.** Ce sont les deux modules les plus
-   utilisés d'un logiciel de gestion immobilière et les seuls, avec 14 et 15, à
-   n'avoir aucune couverture.
-2. **Module 1 : brancher les filtres déjà présents** dans `PropertyFilter`
-   (`available_from`, `tags`) sur la route, ajouter `owner_id` et
-   `manager_id`, et rendre `virtual_tour_url`/`is_360` accessibles en écriture.
-3. **Module 15 : ajouter le cycle de vie du sinistre** (`GET`/`PUT`
-   `/api/insurance/claims/{id}`, expert, indemnisation, travaux de remise en
-   état) et le suivi des attestations.
-4. **Module 2 : aligner la signature de mandat** sur le dossier de preuve du
-   module 4.
-5. **Module 1 : ajouter l'export CSV, le rapport d'évaluation PDF, les
-   recherches favorites et l'upload vidéo.**
-6. **Module 14 : décider.** Soit le socle API actuel suffit et le cahier des
+1. **Module 14 : décider.** Soit le socle API actuel suffit et le cahier des
    charges doit être amendé, soit les quatre applications restent à construire
    — elles n'existent pas.
+2. **Frontend / portails.** Le dépôt ne contient toujours aucun écran ; l'API
+   seule n'est pas un produit utilisable. Le Module 22 fournit désormais les
+   endpoints publics nécessaires à un site vitrine, mais pas les écrans.
+3. **Intégrations réelles.** Email/SMS/signature/paiement/banque/portails sont
+   journalisés ou en partie simulés ; il reste à les brancher sur des
+   prestataires réels en production.
