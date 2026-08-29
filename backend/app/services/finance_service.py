@@ -61,7 +61,7 @@ from app.models.tenant import (
     RentReceipt,
     Tenant,
 )
-from app.models.owner import Owner
+from app.models.owner import Owner, PropertyOwner
 from app.models.property import Property
 
 # Taux d'intérêt légal par défaut (paramétrable au niveau de l'appel).
@@ -1269,20 +1269,46 @@ def add_deposit_deduction(db: Session, deposit_id: int, data) -> DepositDeductio
 # ---------------------------------------------------------------------------
 # Exports comptables
 # ---------------------------------------------------------------------------
+def _apply_export_scope(db: Session, query, entity_type: Optional[str], entity_id: Optional[int]):
+    """Restreint un export comptable au périmètre demandé.
+
+    ``global`` (ou absence d'identifiant) renvoie tout le journal. ``property``
+    ne conserve que les écritures rattachées au bien visé. ``owner`` ne conserve
+    que les écritures des biens détenus par ce propriétaire : sans ce filtre, un
+    export « par propriétaire » restituait l'intégralité du journal, ce qui
+    rendait le relevé inutilisable en comptabilité de gérance.
+    """
+    if not entity_id or entity_type in (None, "", "global"):
+        return query
+    if entity_type == "property":
+        return query.filter(JournalEntry.property_id == entity_id)
+    if entity_type == "owner":
+        owned = [
+            row[0]
+            for row in db.query(PropertyOwner.property_id)
+            .filter(PropertyOwner.owner_id == entity_id)
+            .all()
+        ]
+        if not owned:
+            # Propriétaire sans bien : export volontairement vide plutôt que
+            # journal complet.
+            return query.filter(JournalEntry.id.is_(None))
+        return query.filter(JournalEntry.property_id.in_(owned))
+    raise ValueError(f"Périmètre d'export inconnu : {entity_type}")
+
+
 def export_accounting(db: Session, data) -> Dict:
     """Génère un export comptable (FEC, CSV, Sage, QuickBooks, Ciel)."""
-    entries = db.query(JournalEntry).filter(
-        JournalEntry.entry_date >= data.period_start,
-        JournalEntry.entry_date <= data.period_end,
-        JournalEntry.status != JournalEntryStatus.REVERSED,
-    ).order_by(JournalEntry.entry_date).all()
-
-    if data.entity_type == "owner" and data.entity_id:
-        owner_tx = db.query(JournalEntry).filter(
+    entries = _apply_export_scope(
+        db,
+        db.query(JournalEntry).filter(
             JournalEntry.entry_date >= data.period_start,
             JournalEntry.entry_date <= data.period_end,
-            JournalEntry.source_type == "owner",
-        )
+            JournalEntry.status != JournalEntryStatus.REVERSED,
+        ),
+        data.entity_type,
+        data.entity_id,
+    ).order_by(JournalEntry.entry_date).all()
 
     total_debit = 0.0
     total_credit = 0.0
