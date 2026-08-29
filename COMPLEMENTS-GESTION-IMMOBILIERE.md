@@ -6,9 +6,14 @@ Analyse réalisée le 2026-08-29 sur la branche `arena/01a04c7d-gestimmo`.
 existants ont été implémentés (modules 1, 2 et 15 : vidéos, visite 360°,
 filtres, recherches favorites, exports, rapport d'évaluation, historique
 consolidé, signature de mandat avec preuve, synthèse financière par bien,
-cycle de vie des sinistres et attestations). La suite passe de 64 à
-**89 tests d'intégration verts**. Les nouvelles sections 18+ ci-dessous
-restent à traiter.
+cycle de vie des sinistres et attestations). Les sections 18 à 31 ci-dessous
+sont désormais **implémentées côté backend** sous `/api/extension` (et
+`/api/public-portal` pour le Module 22) et couvertes par
+`backend/tests/test_extension_modules.py`. La suite passe de 64 à
+**95 tests d'intégration verts**. Peuvent être considérés comme des
+**extensions métier optionnelles ou à affiner** : la totale des points 3.2
+(mais les endpoints sont journalisés) et 3.4 (i18n, multi-devise, white-label,
+observabilité).
 
 ---
 

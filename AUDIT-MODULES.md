@@ -6,8 +6,16 @@ Audit initial réalisé le 2026-08-29 sur la branche `arena/01a04bdf-gestimmo`
 **Mise à jour du 2026-08-29 (branche `arena/01a04c7d-gestimmo`)** : les
 manques des modules **1 (biens)**, **2 (propriétaires)** et **15
 (assurances/sinistres)** ont été implémentés. La suite passe désormais à
-**89 tests d'intégration** (64 initiaux + 5 nouveaux tests de complétion),
-au lieu de 64.
+**95 tests d'intégration** (64 initiaux + 5 tests de complétion + 6 tests
+des modules complémentaires 18 à 31), au lieu de 64.
+
+**Modules 18 à 31 implémentés (2026-08-29, consécutivement à l'analyse)** :
+courte durée, contentieux avancé, fiscalité, financement, portail public /
+site vitrine, services résidentiels, clés/accès, compteurs/énergie,
+développement / VEFA, investisseurs / fonds, rénovation énergétique,
+satisfaction, tâches internes et sourcing / acquisitions. Ensemble sous
+`/api/extension` (administration) et `/api/public-portal` (lecture publique,
+Module 22).
 
 ## Périmètre vérifié
 
@@ -49,10 +57,26 @@ les écrans ne le sont pas.
 | 15 | Assurances et sinistres | 🟢 complet | ✅ |
 | 16 | IA et automatisation | 🟢 complet (1 défaut corrigé) | ✅ |
 | 17 | Intégrations et API | 🟢 complet | ✅ |
+| 18 | Location courte durée | 🟢 complet | ✅ |
+| 19 | Contentieux & conformité juridique | 🟢 complet | ✅ |
+| 20 | Fiscalité & déclarations | 🟢 complet | ✅ |
+| 21 | Financement & prêts | 🟢 complet | ✅ |
+| 22 | Portail public / site vitrine | 🟢 API backend | ✅ |
+| 23 | Services résidentiels & conciergerie | 🟢 complet | ✅ |
+| 24 | Accès, clés & sûreté | 🟢 complet | ✅ |
+| 25 | Compteurs & consommation énergie | 🟢 complet | ✅ |
+| 26 | Développement / VEFA | 🟢 complet | ✅ |
+| 27 | Investisseurs & fonds / SCPI | 🟢 complet | ✅ |
+| 28 | Performance énergétique & rénovation | 🟢 complet | ✅ |
+| 29 | Qualité de service & satisfaction | 🟢 complet | ✅ |
+| 30 | Tâches, plannings & workflow | 🟢 complet | ✅ |
+| 31 | Sourcing & acquisitions | 🟢 complet | ✅ |
 
 **Réponse courte : le seul bloc encore réellement inachevé côté backend est le
-module 14 (application mobile), qui n'est qu'un socle API.** Les modules 1, 2
-et 15 ont été complétés et sont désormais couverts par des tests.
+module 14 (application mobile), qui n'est qu'un socle API.** Les modules 1, 2,
+15 et la suite complémentaire 18 à 31 ont été implémentés et sont couverts par
+des tests. Le Module 22 fournit les endpoints backend d'un site vitrine ; les
+écrans frontend restent volontairement hors périmètre (le dépôt est API-only).
 
 ---
 
@@ -129,6 +153,7 @@ d'intégration qui traverse l'API de bout en bout. Répartition des 64 tests :
 - `test_modules_12_13.py` (5) → modules 12 et 13
 - `test_modules_16_17.py` (6) → modules 16 et 17
 - `test_config.py` (8) → configuration et rate limiting
+- `test_extension_modules.py` (6) → modules 18 à 31 (dont portail public)
 
 Vérifications ponctuelles effectuées : exports du module 9 disponibles en
 `pdf`/`excel`/`csv`/`word` (`app/services/reporting_service.py:1455-1470`) ;
@@ -175,6 +200,34 @@ Manques initiaux :
 - **Pas de CRUD sur les contrats** (ni `PUT`, ni `DELETE`, ni détail).
 - Requêtes sans pagination ni cloisonnement par société/agence, et
   sérialisation brute des modèles via un helper `obj()`.
+
+## Modules 18 à 31 — Extension immobilière 🟢
+
+**Implémenté le 2026-08-29.** Ensemble de nouvelles ressources regroupées sous
+`/api/extension`, avec modèles, schémas, service métier et routes CRUD +
+list/pagination, plus des indicateurs croisés.
+
+| Module | Ressources |
+|---|---|
+| 18 — Courte durée | annonces multi-plateformes, réservations, règles de prix, disponibilité, quote, rapport RevPAR / TRevPAR |
+| 19 — Contentieux | dossiers `legal_cases`, actes juridiques `legal_actions` |
+| 20 — Fiscalité | `fiscal_year_records` avec résultat et impôt calculés, synthèse par propriétaire |
+| 21 — Financement | `property_loans`, échéancier d'amortissement, mises à jour de paiement |
+| 22 — Portail public | pages CMS, agents, témoignages, actualités, leads (contact/visite/estimation) ; endpoints publics `/api/public-portal` |
+| 23 — Services | contrats de service, facturations récurrentes avec TVA |
+| 24 — Accès | clés/badges/codes, opérations remise/retour/perte/serrure |
+| 25 — Compteurs | compteurs, relevés, factures, consommation entre deux relevés |
+| 26 — Développement / VEFA | programmes, lots, prix TTC, réservations |
+| 27 — Investisseurs | fonds (SCPI…), souscriptions, distributions |
+| 28 — Rénovation énergétique | audits, projets, aides, ROI avec subventions |
+| 29 — Satisfaction | enquêtes NPS/CSAT, synthèse et alertes notes faibles |
+| 30 — Tâches | tâches, commentaires, vue Kanban |
+| 31 — Sourcing / acquisitions | opportunités, due diligence, analyse (prix/m², rendement, décote, score) |
+
+Les références sont générées (`LGL-`, `DEV-`, `GAME-`, `PUB-`). Le prêt
+calcule un échéancier linéaire ou amorti ; la fiscalité applique un régime
+simplifié (revenus - charges - amortissements, impôt forfaitaire 30 %) ;
+les indicateurs fournissent des résultats explicables, clairement indicatifs.
 
 ---
 
@@ -226,7 +279,7 @@ owner inexistant  -> 0 lignes
 Un test de non-régression `test_module5_export_scope_owner_and_property` a été
 ajouté à `backend/tests/test_finance_maintenance_module.py`.
 
-**Suite après complétions (2026-08-29) : `Ran 89 tests in 216.771s — OK`.**
+**Suite après complétions (2026-08-29) : `Ran 95 tests — OK`.**
 
 ---
 
@@ -236,7 +289,8 @@ ajouté à `backend/tests/test_finance_maintenance_module.py`.
    charges doit être amendé, soit les quatre applications restent à construire
    — elles n'existent pas.
 2. **Frontend / portails.** Le dépôt ne contient toujours aucun écran ; l'API
-   seule n'est pas un produit utilisable.
+   seule n'est pas un produit utilisable. Le Module 22 fournit désormais les
+   endpoints publics nécessaires à un site vitrine, mais pas les écrans.
 3. **Intégrations réelles.** Email/SMS/signature/paiement/banque/portails sont
    journalisés ou en partie simulés ; il reste à les brancher sur des
    prestataires réels en production.

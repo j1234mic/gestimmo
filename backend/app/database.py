@@ -135,6 +135,7 @@ def init_db():
     from app.models import finance, maintenance, condo, crm, reporting, communication, ged  # noqa: F401
     from app.models import admin_security, geolocation, insurance  # noqa: F401
     from app.models import ai_automation, integration  # noqa: F401
+    from app.models import extension  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
     _ensure_module_12_13_columns()

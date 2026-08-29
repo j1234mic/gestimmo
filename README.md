@@ -2,17 +2,19 @@
 
 API FastAPI couvrant la gestion des biens, des propriétaires et des locataires.
 
-## État d'avancement des 17 modules
+## État d'avancement des 31 modules
 
 Le détail complet, module par module et avec les preuves d'exécution, est dans
 [`AUDIT-MODULES.md`](AUDIT-MODULES.md). En synthèse :
 
 - **complets et couverts par des tests d'intégration** : modules 1 (biens), 2
-  (propriétaires), 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16 et 17 ;
+  (propriétaires), 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17 et **18 à
+  31** (extension immobilière, sous `/api/extension`);
 - **socle API uniquement** : module 14 (mobile). Le dépôt ne contient
   **aucun frontend ni code mobile** : les portails, la carte, les widgets et
   les quatre applications du cahier des charges existent côté endpoints, pas
-  côté écrans.
+  côté écrans. Le module 22 expose néanmoins les endpoints backend d'un site
+  vitrine (`/api/public-portal`).
 
 Le module 1 couvre désormais aussi les vidéos de galerie, la visite 360°,
 les filtres propriétaire/gestionnaire/disponibilité/tags, les recherches
@@ -21,7 +23,7 @@ consolidé. Le module 2 couvre la signature électronique du mandat avec dossier
 de preuve et la synthèse financière par bien. Le module 15 couvre le cycle de
 vie complet des contrats, sinistres et attestations.
 
-Suite de tests : 89 tests d'intégration, tous verts.
+Suite de tests : 95 tests d'intégration, tous verts.
 
 ```bash
 cd backend
@@ -263,6 +265,42 @@ Le module d'intégration (`/api/integrations`) ajoute :
 - **Zapier et Make** : catalogue préconfiguré de triggers, actions et recherches reposant sur les webhooks et l'API v1.
 
 Les droits du module sont regroupés sous `integrations`. Une clé limitée à `properties:read` ne peut par exemple ni créer un bien ni lire l'annuaire locataire.
+
+## Modules 18 à 31 — Extension immobilière (`/api/extension`)
+
+Suite des domaines complémentaires décrits dans
+[`COMPLEMENTS-GESTION-IMMOBILIERE.md`](COMPLEMENTS-GESTION-IMMOBILIERE.md) :
+
+- **18 — Location courte durée** : annonces multi-plateformes (Airbnb, Booking,
+  Abritel, direct), réservations, règles de prix saisonnières, disponibilité,
+  quote et reporting (taux d'occupation, RevPAR, TRevPAR) ;
+- **19 — Contentieux** : dossiers juridiques multi-corps et suivi des actes
+  (assignation, médiation, commandement…) ;
+- **20 — Fiscalité** : enregistrements `fiscal_year_records` avec régime,
+  revenus, charges, amortissements, résultat et impôt, plus synthèse par
+  propriétaire ;
+- **21 — Financement** : prêts, tableau d'amortissement, échéances et statut
+  des paiements ;
+- **22 — Portail public** : pages CMS, agents, témoignages, actualités et
+  leads (contact / visite / estimation / candidature) avec suivi par jeton.
+  Lectures publiques sous `/api/public-portal` ;
+- **23 — Services résidentiels** : contrats de service (ménage, linge,
+  parking, wifi…) et facturations récurrentes ;
+- **24 — Accès, clés & sûreté** : clés, badges, codes, remises / retours,
+  pertes, alertes ;
+- **25 — Compteurs & énergie** : compteurs, relevés, factures et consommation
+  entre deux relevés ;
+- **26 — Développement / VEFA** : programmes, lots, prix TTC, réservations ;
+- **27 — Investisseurs & fonds** : SCPI/SCI, souscriptions, distributions ;
+- **28 — Rénovation énergétique** : audits, projets, aides et ROI ;
+- **29 — Satisfaction** : NPS/CSAT, synthèse et alertes notes faibles ;
+- **30 — Tâches internes** : tâches assignables, priorités, échéances,
+  commentaires et vue Kanban ;
+- **31 — Sourcing & acquisitions** : opportunités, due diligence, analyse
+  (prix/m², rendement, décote, score).
+
+`GET /api/extension/overview` agrège les compteurs de toutes ces ressources.
+Les identifiants de référence sont générés (`LGL-`, `DEV-`, `GAME-`, `PUB-`).
 
 ## Démarrage avec Docker
 
@@ -518,6 +556,12 @@ Les tests utilisent SQLite et couvrent le dépôt d'une candidature, l'OCR, le s
 Le module 7 (copropriété) et les compléments du module 6 (bon de commande, contrôle qualité, planning Gantt) sont couverts par `tests/test_condo_module.py` : lots et tantièmes, budget et vote, appels de fonds répartis automatiquement, paiements, fonds travaux, assemblée générale complète (convocation, présence, résolutions/votes, PV, clôture), conseil syndical, carnet d'entretien et comptabilité dédiée (plan comptable, écritures, grand livre, bilan).
 
 Le module 8 (CRM et gestion commerciale) est couvert par `tests/test_crm_module.py` : score de qualité explicable du prospect, cycle de vie d'un dossier dans le pipeline jusqu'au Kanban, workflow complet des visites (disponibilités réservées/libérées, confirmation, rappels, compte-rendu, retour visiteur, agenda jour/semaine/mois), matching automatique avec détail du score, publication multi-portails avec statistiques et taux de conversion, transaction de vente de l'offre d'achat à l'acte authentique (conditions suspensives bloquantes, commission HT/TTC) et performance des agents.
+
+Les modules 18 à 31 sont couverts par `tests/test_extension_modules.py` : quote
+et reporting courte durée, disponibilités, contentieux, fiscalité, prêts et
+échéancier, services, accès, compteurs, VEFA, fonds, rénovation, satisfaction,
+tâches et sourcing, ainsi que le portail public (pages, agents, témoignages,
+actualités, leads et suivi par jeton).
 
 Le module 9 (tableau de bord et reporting) est couvert par `tests/test_reporting_module.py` : KPIs temps réel et graphiques, widgets avec réorganisation drag & drop, les neuf rapports prédéfinis, les quatre formats d'export (PDF vérifié avec pypdf, Excel, CSV, Word), générateur de rapports personnalisés (filtres coercés vers les enums/dates, groupements avec agrégats), partage par jeton, planification d'exécution et alertes à seuils avec anti-spam et prise de connaissance.
 
