@@ -54,6 +54,10 @@ class Property(Base):
     __tablename__ = "properties"
 
     id = Column(Integer, primary_key=True, index=True)
+    # Identifiant public chiffré (architecture hexagonale). Non déterministe,
+    # exposé dans l'API à la place de l'id entier. Nullable pour la
+    # compatibilité ascendante (backfill effectué dans app.database.init_db).
+    secure_id = Column(String(255), unique=True, index=True, nullable=True)
     reference = Column(String(20), unique=True, index=True, nullable=False)
     
     # Informations générales

@@ -35,6 +35,9 @@ class Owner(Base):
     __tablename__ = "owners"
 
     id = Column(Integer, primary_key=True, index=True)
+    # Identifiant public chiffré (architecture hexagonale). Nullable pour la
+    # compatibilité ascendante (backfill effectué dans app.database.init_db).
+    secure_id = Column(String(255), unique=True, index=True, nullable=True)
     reference = Column(String(20), unique=True, index=True, nullable=False)
 
     # Type de propriétaire

@@ -43,6 +43,35 @@ def _ensure_module_12_13_columns():
             connection.execute(text(f"CREATE INDEX IF NOT EXISTS ix_properties_{name} ON properties ({name})"))
 
 
+def _backfill_secure_ids():
+    """Chiffre les identifiants entiers existants dans ``secure_id``.
+
+    Idempotent : seules les lignes dont ``secure_id`` est NULL sont traitées.
+    Garantit qu'aucune entité persistée n'expose son id entier sans
+    équivalent chiffré.
+    """
+    from app.hexagon.infrastructure.security.id_cipher import encrypt_id
+    from app.models.owner import Owner
+    from app.models.property import Property
+
+    orm_model = {"properties": Property, "owners": Owner}
+    for table in ("properties", "owners"):
+        inspector = inspect(engine)
+        if table not in inspector.get_table_names():
+            continue
+        cols = {c["name"] for c in inspector.get_columns(table)}
+        if "secure_id" not in cols:
+            with engine.begin() as connection:
+                connection.execute(text(f"ALTER TABLE {table} ADD COLUMN secure_id VARCHAR(255)"))
+                connection.execute(text(f"CREATE UNIQUE INDEX IF NOT EXISTS ix_{table}_secure_id ON {table} (secure_id)"))
+        with SessionLocal() as db:
+            rows = db.query(orm_model[table]).filter(orm_model[table].secure_id.is_(None)).all()
+            for row in rows:
+                row.secure_id = encrypt_id(row.id)
+            if rows:
+                db.commit()
+
+
 def init_db():
     """Charge tous les modèles puis crée uniquement les tables absentes.
 
@@ -57,6 +86,7 @@ def init_db():
 
     Base.metadata.create_all(bind=engine)
     _ensure_module_12_13_columns()
+    _backfill_secure_ids()
 
     # Amorçage idempotent des profils prédéfinis et des comptes historiques.
     from app.services.admin_security_service import bootstrap_security
