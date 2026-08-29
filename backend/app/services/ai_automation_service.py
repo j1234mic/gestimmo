@@ -1157,12 +1157,11 @@ def _conversational_turn(
     previous_meta = (previous.metadata_json or {}) if previous else {}
     previous_action = previous_meta.get("action") if previous_meta else None
 
-    if words & _GREETINGS and len(words) <= 3:
-        return _reply(
-            "greeting", 0.98,
-            "Bonjour ! Je suis là pour vous aider. Qu'est-ce que vous souhaitez faire aujourd'hui ?",
-            TENANT_SUGGESTIONS if session.actor_type == "tenant" else MANAGER_SUGGESTIONS,
-        )
+    # Une salutation n'est pas traitée ici : les résolveurs métier la routent
+    # déjà vers l'aide contextuelle de l'acteur (`manager_help` /
+    # `tenant_help`, ouverture « Bonjour ! »). Renvoyer une phrase générique
+    # unique écraserait cette aide et rendrait chaque salutation indiscernable
+    # d'un autre tour de parole.
     if normalized in {"au revoir", "a bientot", "à bientôt", "bye", "adieu", "c'est tout", "ca ira", "ça ira"}:
         return _reply(
             "smalltalk", 0.94,
