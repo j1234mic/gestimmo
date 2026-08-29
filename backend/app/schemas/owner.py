@@ -63,6 +63,7 @@ class OwnerUpdate(BaseModel):
 
 class OwnerResponse(BaseModel):
     id: int
+    secure_id: Optional[str] = None
     reference: str
     owner_type: str
     first_name: Optional[str] = None

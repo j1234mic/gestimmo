@@ -10,6 +10,7 @@ from app.models.property import (
     PropertyHistory, PropertyEvaluation, PropertyStatus, PropertyType
 )
 from app.schemas.property import PropertyCreate, PropertyUpdate, PropertyFilter, PropertyResponse
+from app.hexagon.infrastructure.security.id_cipher import encrypt_id
 
 
 def generate_reference():
@@ -37,6 +38,11 @@ def create_property(db: Session, property_data: PropertyCreate):
     db.add(db_property)
     db.commit()
     db.refresh(db_property)
+
+    # Identifiant public chiffré (secure_id) — exposé à la place de l'id entier.
+    if not db_property.secure_id:
+        db_property.secure_id = encrypt_id(db_property.id)
+        db.commit()
     
     add_history_entry(
         db,

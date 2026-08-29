@@ -99,6 +99,9 @@ class Settings:
     APP_NAME = "API Gestion Immobilière"
     APP_VERSION = "1.2.0"
     SECRET_KEY = os.getenv("SECRET_KEY", "ma-cle-secrete-2024")
+    # Clé de chiffrement des identifiants publics (secure_id). Si absente, une
+    # clé de session éphémère est générée (voir app/hexagon/infrastructure/security/id_cipher.py).
+    SECURE_ID_KEY = os.getenv("SECURE_ID_KEY", "")
     ACCESS_TOKEN_EXPIRE_MINUTES = parse_int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES"), 30)
     REFRESH_TOKEN_EXPIRE_DAYS = parse_int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS"), 7)
     RATE_LIMIT_REQUESTS = parse_int(os.getenv("RATE_LIMIT_REQUESTS"), 100)

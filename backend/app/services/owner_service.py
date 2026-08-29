@@ -7,6 +7,7 @@ from datetime import date
 
 from app.models.owner import Owner, PropertyOwner, Mandate
 from app.schemas.owner import OwnerCreate, OwnerUpdate, MandateCreate
+from app.hexagon.infrastructure.security.id_cipher import encrypt_id
 
 
 def generate_reference():
@@ -27,6 +28,11 @@ def create_owner(db: Session, data: OwnerCreate):
     db.add(owner)
     db.commit()
     db.refresh(owner)
+
+    # Identifiant public chiffré (secure_id) — exposé à la place de l'id entier.
+    if not owner.secure_id:
+        owner.secure_id = encrypt_id(owner.id)
+        db.commit()
     return owner
 
 

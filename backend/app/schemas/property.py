@@ -83,6 +83,7 @@ class PropertyUpdate(PropertyCreate):
 
 class PropertyResponse(BaseModel):
     id: int
+    secure_id: Optional[str] = None
     reference: str
     type: str
     status: str
