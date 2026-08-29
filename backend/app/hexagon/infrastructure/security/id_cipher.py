@@ -54,7 +54,10 @@ def _get_fernet_key() -> bytes:
     # Aucune clé configurée : on génère une clé de session (non persistante).
     logger.warning(
         "SECURE_ID_KEY non configurée : une clé éphémère est générée. "
-        "Les secure_id existants ne pourront pas être déchiffrés après redémarrage."
+        "Les secure_id existants ne pourront pas être déchiffrés après redémarrage. "
+        "Correctif : ajoutez SECURE_ID_KEY dans backend/.env — python scripts/init_env.py, "
+        "ou générez la clé avec : python -c \"from cryptography.fernet import Fernet; "
+        "print(Fernet.generate_key().decode())\""
     )
     return Fernet.generate_key()
 
