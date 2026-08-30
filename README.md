@@ -30,6 +30,28 @@ cd backend
 python -m unittest discover -s tests
 ```
 
+## Données de test Madagascar
+
+Un jeu d'amorçage idempotent crée 50 biens immobiliers à Madagascar, 10
+propriétaires de démonstration et des galeries de photos réelles référencées
+par URL publiques :
+
+```bash
+cd backend
+python scripts/seed_madagascar_properties.py
+```
+
+Pour une base locale SQLite de test :
+
+```bash
+cd backend
+python scripts/seed_madagascar_properties.py --database-url sqlite:///./test.db
+```
+
+Les références générées sont `MDG-TEST-001` à `MDG-TEST-050` pour les biens et
+`MDG-OWN-001` à `MDG-OWN-010` pour les propriétaires. Relancer le script met à
+jour ces données sans créer de doublons.
+
 ## Module 1 — Biens immobiliers
 
 Le module biens ajoute :
