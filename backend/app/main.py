@@ -39,6 +39,7 @@ from app.routes.extension import router as extension_router
 from app.routes.public_portal import router as public_portal_router
 from app.routes.ai_automation import router as ai_router, tenant_router as tenant_ai_router
 from app.routes.integrations import router as integrations_router, external_router as external_api_router
+from app.routes.subscriptions import router as subscriptions_router
 from app.routes import owner_portal, communication
 # Architecture hexagonale : routeurs v2 (Properties / Owners).
 from app.hexagon.web.property_router import router as properties_v2_router
@@ -132,6 +133,9 @@ app.include_router(public_portal_router)
 # Routeurs du portail propriétaire et de la communication
 app.include_router(owner_portal.router)
 app.include_router(communication.router)
+
+# Module « Abonnements & revenus récurrents »
+app.include_router(subscriptions_router)
 
 # Routeurs hexagonaux (v2) — pilotés par les cas d'usage, sans logique ORM
 # dans les routes. Ils coexistent avec les routeurs historiques.
