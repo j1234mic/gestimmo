@@ -139,6 +139,18 @@ class MandateSignatureRequest(BaseModel):
     consent: Optional[str] = "Je reconnais avoir lu le mandat et consens à le signer électroniquement."
 
 
+class OwnerCredentialsRequest(BaseModel):
+    """Demande de génération d'un compte de connexion pour un propriétaire.
+
+    - ``email`` : adresse de connexion (utilise l'email du propriétaire si omis).
+    - ``password`` : mot de passe imposé (généré automatiquement si omis).
+    - ``reset_existing`` : réinitialise le mot de passe si un compte existe déjà.
+    """
+    email: Optional[EmailStr] = None
+    password: Optional[str] = None
+    reset_existing: bool = False
+
+
 # ============================================
 # PROPERTY-OWNER LINK
 # ============================================

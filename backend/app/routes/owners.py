@@ -5,13 +5,18 @@ from sqlalchemy.orm import Session
 from typing import Optional, List
 from datetime import date, datetime, timezone
 import os
+import secrets
+import string
 import uuid
 import aiofiles
 
 from app.database import get_db
 from app.auth import require_read, require_write, get_optional_user
 from app.config import settings
+from app.models.admin_security import AdminRole, AdminUser, UserRoleAssignment
 from app.models.owner import Owner, PropertyOwner, Mandate
+from app.services import admin_security_service as security_service
+from app.services.admin_security_service import pwd_context
 from app.services.owner_service import (
     create_owner, get_owner, get_owners, update_owner, delete_owner,
     link_property_to_owner, unlink_property_from_owner,
@@ -19,7 +24,8 @@ from app.services.owner_service import (
 )
 from app.schemas.owner import (
     OwnerCreate, OwnerUpdate, OwnerResponse, OwnerDetailResponse,
-    MandateCreate, MandateResponse, MandateSignatureRequest, PropertyOwnerLink
+    MandateCreate, MandateResponse, MandateSignatureRequest, PropertyOwnerLink,
+    OwnerCredentialsRequest,
 )
 from fastapi.responses import FileResponse
 from pathlib import Path
@@ -157,6 +163,135 @@ def delete_owner_endpoint(
     if not owner:
         raise HTTPException(status_code=404, detail="Propriétaire non trouvé")
     return {"message": "Propriétaire supprimé"}
+
+
+# ============================================
+# CONNEXION / COMPTE PROPRIÉTAIRE
+# ============================================
+def _generate_temp_password(length: int = 16) -> str:
+    """Génère un mot de passe conforme à la politique par défaut du module 12
+    (majuscule, minuscule, chiffre et caractère spécial)."""
+    alphabet = string.ascii_letters + string.digits + "!@#$%^&*"
+    while True:
+        password = "".join(secrets.choice(alphabet) for _ in range(length))
+        if (
+            any(c.islower() for c in password)
+            and any(c.isupper() for c in password)
+            and any(c.isdigit() for c in password)
+            and any(c in "!@#$%^&*" for c in password)
+        ):
+            return password
+
+
+def _owner_display_name(owner: Owner) -> str:
+    return (
+        owner.company_name
+        or " ".join(part for part in (owner.first_name, owner.last_name) if part).strip()
+        or (owner.email or "")
+    ).strip()
+
+
+@router.post("/{owner_id}/credentials", status_code=201)
+def generate_owner_credentials(
+    owner_id: int,
+    data: OwnerCredentialsRequest,
+    db: Session = Depends(get_db),
+    current_user = Depends(require_write)
+):
+    """Crée un compte de connexion (AdminUser) pour un propriétaire existant.
+
+    Le compte est lié au propriétaire par l'email : une fois connecté via
+    ``POST /api/auth/login``, ``get_current_owner`` résout le propriétaire en
+    base et l'accès au portail propriétaire (``/owner-portal/*``) est possible.
+
+    Le mot de passe généré n'est renvoyé qu'à la création (ou lors d'une
+    réinitialisation demandée) et le compte est marqué
+    ``must_change_password`` pour forcer son renouvellement à la première
+    connexion.
+    """
+    owner = get_owner(db, owner_id)
+    if not owner:
+        raise HTTPException(status_code=404, detail="Propriétaire non trouvé")
+
+    email = (data.email or owner.email or "").strip().lower()
+    if not email:
+        raise HTTPException(
+            status_code=400,
+            detail="Le propriétaire n'a pas d'email : renseignez-en un pour créer une connexion",
+        )
+
+    existing = db.query(AdminUser).filter(AdminUser.email == email).first()
+    if existing and not data.reset_existing:
+        raise HTTPException(
+            status_code=409,
+            detail="Un compte de connexion existe déjà pour cet email (utilisez reset_existing=true pour réinitialiser le mot de passe)",
+        )
+
+    generated = data.password is None
+    password = data.password or _generate_temp_password()
+
+    if data.password is not None:
+        # Contrôle la politique de mot de passe du module 12 (par défaut,
+        # sans société rattachée) pour un mot de passe imposé par l'agent.
+        policy = security_service.get_policy(db, None)
+        try:
+            security_service.validate_password(data.password, policy)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
+    if existing is None:
+        user = AdminUser(
+            email=email,
+            full_name=_owner_display_name(owner),
+            password_hash=pwd_context.hash(password),
+            must_change_password=True,
+        )
+        db.add(user)
+        db.flush()
+    else:
+        user = existing
+        user.full_name = _owner_display_name(owner)
+        user.password_hash = pwd_context.hash(password)
+        user.must_change_password = True
+        user.is_active = True
+        user.locked_until = None
+        user.failed_login_attempts = 0
+
+    # Synchronise l'email du propriétaire pour que ``get_current_owner``
+    # puisse résoudre le compte de connexion vers le bon propriétaire.
+    if owner.email != email:
+        owner.email = email
+
+    # Attribue le profil « Lecture seule » (viewer) si aucun rôle n'est déjà
+    # affecté, afin de disposer d'un principal correct sans donner de droits
+    # d'administration.
+    has_role = db.query(UserRoleAssignment).filter(
+        UserRoleAssignment.user_id == user.id
+    ).first()
+    if not has_role:
+        viewer_role = db.query(AdminRole).filter(
+            AdminRole.profile_key == "viewer", AdminRole.is_system == True
+        ).first()
+        if viewer_role:
+            db.add(UserRoleAssignment(
+                user_id=user.id, role_id=viewer_role.id, assigned_by="owner_credentials",
+            ))
+
+    db.commit()
+    db.refresh(user)
+
+    response = {
+        "owner_id": owner.id,
+        "reference": owner.reference,
+        "full_name": user.full_name,
+        "email": user.email,
+        "must_change_password": user.must_change_password,
+        "login_url": "/api/auth/login",
+        "portal_url": "/owner-portal/dashboard",
+    }
+    if generated:
+        response["password"] = password
+    return response
 
 
 # ============================================
