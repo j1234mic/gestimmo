@@ -23,7 +23,7 @@ consolidé. Le module 2 couvre la signature électronique du mandat avec dossier
 de preuve et la synthèse financière par bien. Le module 15 couvre le cycle de
 vie complet des contrats, sinistres et attestations.
 
-Suite de tests : 111 tests d'intégration, tous verts.
+Suite de tests : 113 tests d'intégration, tous verts.
 
 ```bash
 cd backend
@@ -81,7 +81,11 @@ Le module propriétaires ajoute :
 - comptabilité propriétaire (solde, relevé mensuel/trimestriel/annuel PDF) et
   **synthèse financière par bien** ;
 - portail propriétaire JWT (dashboard, revenus/charges, documents, messagerie,
-  déclaration fiscale).
+  déclaration fiscale) ;
+- **connexion propriétaire** : génération d'un compte de connexion à partir d'un
+  propriétaire existant (`POST /api/owners/{id}/credentials`) — l'email lie le
+  compte au propriétaire, un mot de passe temporaire est généré et imposé au
+  renouvellement à la première connexion.
 
 ## Module 3 — Gestion des locataires
 
@@ -468,6 +472,16 @@ En production, `SECRET_KEY` doit être une valeur aléatoire stable et sauvegard
 
 ## Principaux endpoints
 
+### Propriétaires
+
+- `GET|POST /api/owners/`, `GET|PUT|DELETE /api/owners/{id}` — fiche propriétaire ;
+- `POST /api/owners/{id}/credentials` — générer un compte de connexion pour un
+  propriétaire existant (corps : `email`, `password`, `reset_existing`
+  optionnels). Retourne l'email et le mot de passe temporaire, à renouveler à la
+  première connexion via `PUT /api/admin/users/{id}/password` ;
+- `POST /api/owners/{id}/properties`, `DELETE /api/owners/{id}/properties/{property_id}` — rattacher/détacher un bien ;
+- `POST|GET /api/owners/{id}/mandates`, `PUT|DELETE /api/owners/{id}/mandates/{mandate_id}` — mandats.
+
 ### Candidatures
 
 - `POST /api/applications/` — déposer une candidature publique ;
@@ -680,8 +694,9 @@ cinq prestataires, abonnement premium, encaissement via checkout en mode
 simulation, confirmation idempotente (jeton et webhook), annulation et agrégat de
 revenu.
 
-La suite complète comporte **111 tests d'intégration**. Les modules 1 (biens),
+La suite complète comporte **113 tests d'intégration**. Les modules 1 (biens),
 2 (propriétaires) et 15 (assurances/sinistres) sont désormais couverts par
-`tests/test_module1_2_15_completions.py`. Le seul module encore non couvert
+`tests/test_module1_2_15_completions.py`. La génération d'un compte de connexion
+propriétaire est couverte par `tests/test_owner_credentials.py`. Le seul module encore non couvert
 est le module 14 (mobile, socle API uniquement). Voir
 [`AUDIT-MODULES.md`](AUDIT-MODULES.md).
