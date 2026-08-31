@@ -232,6 +232,7 @@ def _module_from_path(path: str) -> str:
         "messages": "communication", "notifications": "communication", "ged": "ged",
         "documents": "ged", "history": "properties", "admin": "administration",
         "geolocation": "geolocation",
+        "subscriptions": "subscriptions",
     }
     return mapping.get(segment, segment or "unknown")
 

@@ -23,7 +23,7 @@ consolidé. Le module 2 couvre la signature électronique du mandat avec dossier
 de preuve et la synthèse financière par bien. Le module 15 couvre le cycle de
 vie complet des contrats, sinistres et attestations.
 
-Suite de tests : 95 tests d'intégration, tous verts.
+Suite de tests : 111 tests d'intégration, tous verts.
 
 ```bash
 cd backend
@@ -125,6 +125,35 @@ Le module financier et comptable ajoute :
 - **facturation** : factures d'honoraires et de prestations, devis, avoirs, numérotation automatique, TVA / exonération ;
 - **dépôt de garantie** : encaissement, suivi, retenues justifiées, délai légal de restitution (1 ou 2 mois) et lettre de restitution ;
 - **exports comptables** : FEC (`JournalCode|Date|Compte|Débit|Crédit|Libellé`), CSV, Sage, QuickBooks, Ciel et format personnalisable.
+
+## Module 5bis — Abonnements & revenus récurrents (`/api/subscriptions`)
+
+Module dédié à la monétisation de la plateforme (ex. abonnement **premium**)
+auprès de clients au sens large — personnes ou organisations — distincts des
+propriétaires / locataires existants :
+
+- **client générique** : fiche personne / société (nom légal, email de
+  facturation, coordonnées, pays, référence fiscale) ; CRUD complet sous
+  `/api/subscriptions/clients` ;
+- **compte de paiement multi-prestataires** : compte rattaché à un client chez
+  **Stripe, PayPal, Wise, MVola ou Orange Money** ; un seul compte par
+  prestataire et par client, statut actif/inactif, métadonnées prestataire et
+  compte par défaut ;
+- **abonnement premium** : plan (`basic`, **`premium`**, `business`,
+  `enterprise`), montant, devise, périodicité (mensuel / trimestriel /
+  semestriel / annuel), période d'essai, dates de début/fin, période courante et
+  prochaine échéance, statut (`draft → trial → active → past_due → cancelled /
+  expired`) et annulation en fin de période ;
+- **encaissement réel via prestataire** : création d'une session/marché de
+  paiement à partir du compte du client (Stripe Checkout réel ; PayPal Order ;
+  page Pay Wise/MVola/Orange Money) et **webhook idempotent** de confirmation
+  (`POST /api/subscriptions/webhooks/{provider}`) qui impute le revenu et fait
+  avancer la période de facturation. En développement, sans clé prestataire, un
+  **mode simulation** (`PAYMENT_SIMULATION_ENABLED=true`, défaut) fournit une URL
+  de confirmation locale à jeton, testable de bout en bout ;
+- **suivi du revenu** : encaissements (`/api/subscriptions/payments`) avec
+  statut, période, références prestataires, jeton de confirmation, agrégat de
+  revenu encaissé dans `/api/subscriptions/overview`.
 
 ## Module 6 — Maintenance et travaux
 
@@ -409,6 +438,22 @@ n'empêche le démarrage, mais chacun a une conséquence réelle :
 
 Sans `STRIPE_SECRET_KEY`, l'endpoint de paiement répond `503` au lieu de simuler un encaissement.
 
+### Configuration du module abonnements
+
+| Variable | Utilité | Valeur par défaut |
+|---|---|---|
+| `PAYMENT_SIMULATION_ENABLED` | Sans les clés prestataires, le module génère une URL de confirmation locale testable | `true` |
+| `PUBLIC_BASE_URL` | Base publique servant à construire les URL de paiement / retour | `http://localhost:3000` |
+| `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` | Clés Stripe pour le checkout réel et la signature du webhook | vide (simulation) |
+| `PAYPAL_CLIENT_ID` / `PAYPAL_CLIENT_SECRET` / `PAYPAL_MODE` | Identifiants PayPal (Order web), `sandbox` par défaut | vide (simulation) |
+| `WISE_API_TOKEN` | Jeton API Wise | vide (simulation) |
+| `MVOLA_API_KEY` | Clé API MVola (mobile money) | vide (simulation) |
+| `ORANGE_MONEY_CLIENT_ID` / `ORANGE_MONEY_CLIENT_SECRET` | Identifiants Orange Money | vide (simulation) |
+
+En production, désactivez la simulation (`PAYMENT_SIMULATION_ENABLED=false`) et
+renseignez les identifiants des prestataires utilisés ; sans eux, le module
+bascule sur la simulation locale pour ne jamais bloquer le flux client.
+
 ### Configuration administration et sécurité
 
 | Variable | Utilité | Valeur par défaut |
@@ -581,6 +626,15 @@ En production, `SECRET_KEY` doit être une valeur aléatoire stable et sauvegard
 - `POST|GET /zones`, `GET|PUT|DELETE /zones/{id}`, `/zones/{id}/agents`, `/zones/{id}/statistics`, `POST /zones/assign-properties` — secteurs et agents ;
 - `POST|GET /visits`, `PUT /visits/{id}`, `POST /routes/optimize`, `GET /routes`, `GET /routes/{id}` — visites et tournées.
 
+### Abonnements & revenus récurrents (`/api/subscriptions`)
+
+- `GET /overview` — compteurs (clients, comptes, abonnements actifs, revenu encaissé) ;
+- `POST|GET /clients`, `GET|PATCH /clients/{id}` — clients ; `POST|GET /payment-accounts`, `PATCH /payment-accounts/{id}` — comptes de paiement (Stripe, PayPal, Wise, MVola, Orange Money) ;
+- `POST|GET /`, `GET|PATCH /{id}`, `POST /{id}/cancel` — abonnements premium ;
+- `POST /{id}/checkout` — encaissement via le prestataire (URL de paiement ou simulation) ;
+- `GET /payments`, `GET /payments/{reference}`, `POST /payments/{reference}/confirm` — encaissements et confirmation en simulation ;
+- `POST /webhooks/{provider}` — webhook public du prestataire (idempotent).
+
 ## Scoring
 
 Le score de candidature (0–100) est explicable et versionné. Il porte uniquement sur :
@@ -620,7 +674,13 @@ Les modules 12 et 13 sont couverts par `tests/test_modules_12_13.py` : rôles pe
 
 Les modules 16 et 17 sont couverts par `tests/test_modules_16_17.py` : prédictions explicables et analyse de marché, chatbot locataire (ticket, suivi, rendez-vous), assistant gestionnaire (recherche, impayés, tickets, échéances, portefeuille, workflow), règles d'automatisation avec idempotence, clés API / OAuth2 / rate limiting / webhooks, catalogue de connecteurs, import CSV avec doublons et export XLSX.
 
-La suite complète comporte **89 tests d'intégration**. Les modules 1 (biens),
+Le module 5bis (abonnements & revenus récurrents) est couvert par
+`tests/test_subscriptions_module.py` : CRUD client, comptes de paiement pour les
+cinq prestataires, abonnement premium, encaissement via checkout en mode
+simulation, confirmation idempotente (jeton et webhook), annulation et agrégat de
+revenu.
+
+La suite complète comporte **111 tests d'intégration**. Les modules 1 (biens),
 2 (propriétaires) et 15 (assurances/sinistres) sont désormais couverts par
 `tests/test_module1_2_15_completions.py`. Le seul module encore non couvert
 est le module 14 (mobile, socle API uniquement). Voir

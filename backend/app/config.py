@@ -145,6 +145,24 @@ class Settings:
         "PAYMENT_CANCEL_URL", "http://localhost:3000/tenant/payments/{payment_id}?status=cancelled"
     )
 
+    # Mode simulation d'encaissement des abonnements (par défaut activé en
+    # développement). Quand un prestataire n'est pas configuré, le module
+    # « Abonnements » génère une URL de confirmation locale au lieu d'appeler
+    # l'API du prestataire ; le webhook reste fonctionnel pour la production.
+    PAYMENT_SIMULATION_ENABLED = parse_bool(os.getenv("PAYMENT_SIMULATION_ENABLED"), True)
+    # Base publique utilisée pour construire les URL de retour de la page de
+    # paiement (redirection du client après encaissement).
+    PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "http://localhost:3000")
+    # Clés des prestataires de paiement (optionnelles). Renseignez-les en
+    # production pour désactiver la simulation et appeler l'API réelle.
+    PAYPAL_CLIENT_ID = os.getenv("PAYPAL_CLIENT_ID", "")
+    PAYPAL_CLIENT_SECRET = os.getenv("PAYPAL_CLIENT_SECRET", "")
+    PAYPAL_MODE = os.getenv("PAYPAL_MODE", "sandbox")  # sandbox | live
+    WISE_API_TOKEN = os.getenv("WISE_API_TOKEN", "")
+    MVOLA_API_KEY = os.getenv("MVOLA_API_KEY", "")
+    ORANGE_MONEY_CLIENT_ID = os.getenv("ORANGE_MONEY_CLIENT_ID", "")
+    ORANGE_MONEY_CLIENT_SECRET = os.getenv("ORANGE_MONEY_CLIENT_SECRET", "")
+
     @property
     def upload_dir_path(self):
         return Path(__file__).parent.parent / self.UPLOAD_DIR
