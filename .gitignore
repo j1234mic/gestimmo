@@ -1,0 +1,29 @@
+# Base de données de test locale (binary artifact)
+*.db
+*.sqlite
+*.sqlite3
+
+# Artifacts de test
+test.db
+*.log
+logs/
+
+# Uploads (contenu généré/référencé)
+uploads/
+private_uploads/
+backups/
+
+# Virtual env
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
