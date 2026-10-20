@@ -29,6 +29,7 @@ REF="${GESTIMMO_REF:-main}"
 APP_DIR="${GESTIMMO_DIR:-/opt/gestimmo}"
 DOMAIN="${GESTIMMO_DOMAIN:-}"
 EMAIL="${GESTIMMO_EMAIL:-}"
+SQLITE=0
 DRY_RUN=0
 
 if [[ -t 1 ]]; then
@@ -51,6 +52,7 @@ Options :
   --repo URL         dépôt Git à déployer (défaut : j1234mic/gestimmo)
   --ref REF          branche ou tag à déployer (défaut : main)
   --dir CHEMIN       répertoire d'installation (défaut : /opt/gestimmo)
+  --sqlite           base SQLite sur volume (stack légère, 1 Go de RAM suffit)
   --dry-run          affiche les commandes sans rien modifier
   -h, --help         affiche cette aide
 
@@ -65,6 +67,7 @@ while [[ $# -gt 0 ]]; do
     --repo)   REPO_URL="${2:?--repo attend une valeur}"; shift 2 ;;
     --ref)    REF="${2:?--ref attend une valeur}"; shift 2 ;;
     --dir)    APP_DIR="${2:?--dir attend une valeur}"; shift 2 ;;
+    --sqlite) SQLITE=1; shift ;;
     --dry-run) DRY_RUN=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) die "Option inconnue : $1 (voir --help)" ;;
@@ -216,6 +219,13 @@ run as_root chmod +x "$APP_DIR/deploy/install.sh" "$APP_DIR/deploy/smoke-test.sh
 
 BACKEND_DIR="$APP_DIR/backend"
 ENV_FILE="$BACKEND_DIR/.env"
+if [[ "$SQLITE" -eq 1 ]]; then
+  COMPOSE_NAME="docker-compose.sqlite.yml"
+else
+  COMPOSE_NAME="docker-compose.mysql.yml"
+fi
+COMPOSE_FILE="$BACKEND_DIR/$COMPOSE_NAME"
+log "Base de données : $([[ "$SQLITE" -eq 1 ]] && echo "SQLite (volume sqlite_data)" || echo "MySQL 8.4")"
 if [[ $DRY_RUN -eq 0 ]]; then
   [[ -d "$BACKEND_DIR" ]] || die "backend/ introuvable dans $APP_DIR"
 fi
@@ -292,9 +302,9 @@ else
 fi
 
 # ---------------------------------------------------------------------- compose
-log "Construction et démarrage de la stack (API + MySQL 8.4)"
+log "Construction et démarrage de la stack"
 run as_root docker compose --project-directory "$BACKEND_DIR" \
-  -f "$BACKEND_DIR/docker-compose.mysql.yml" up -d --build
+  -f "$COMPOSE_FILE" up -d --build
 
 if [[ $DRY_RUN -eq 0 ]]; then
   log "Attente de /health (création des 248 tables au premier démarrage)…"
@@ -310,14 +320,14 @@ if [[ $DRY_RUN -eq 0 ]]; then
     log "API en ligne : $PUBLIC_URL (docs : $PUBLIC_URL/docs)"
   else
     warn "L'API ne répond pas encore après 10 minutes."
-    warn "Journal : docker compose -f $BACKEND_DIR/docker-compose.mysql.yml logs --tail=80 api"
+    warn "Journal : docker compose -f $COMPOSE_FILE logs --tail=80 api"
   fi
 fi
 
 # ------------------------------------------------------------------- sauvegardes
 log "Programmation de la sauvegarde quotidienne (03:15)"
 if [[ $DRY_RUN -eq 0 ]]; then
-  BACKUP_CMD="cd $BACKEND_DIR && docker compose -f docker-compose.mysql.yml exec -T api python -c \"from app.database import SessionLocal; from app.services.admin_security_service import create_backup; db=SessionLocal(); create_backup(db, 'cron', 'daily'); db.close()\" >> /var/log/gestimmo-backup.log 2>&1"
+  BACKUP_CMD="cd $BACKEND_DIR && docker compose -f $COMPOSE_NAME exec -T api python -c \"from app.database import SessionLocal; from app.services.admin_security_service import create_backup; db=SessionLocal(); create_backup(db, 'cron', 'daily'); db.close()\" >> /var/log/gestimmo-backup.log 2>&1"
   cat > /etc/cron.d/gestimmo-backup <<EOF
 # Sauvegarde quotidienne GestImmo (mysqldump dans le volume « backups »).
 SHELL=/bin/sh
@@ -339,8 +349,9 @@ cat <<EOF
    Documentation   : $PUBLIC_URL/docs
    Santé           : $PUBLIC_URL/health
    Code            : $APP_DIR (réf. $REF)
-   Base de données : MySQL 8.4, volume Docker « mysql_data »
+   Base de données : $([[ "$SQLITE" -eq 1 ]] && echo "SQLite, volume Docker « sqlite_data »" || echo "MySQL 8.4, volume Docker « mysql_data »")
    Données         : volumes public_uploads, private_uploads, backups
+   Compose         : $COMPOSE_NAME
 
  Comptes créés au premier démarrage (À CHANGER IMMÉDIATEMENT) :
    admin@immogest.com / Admin@2024!

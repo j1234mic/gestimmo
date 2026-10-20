@@ -12,6 +12,10 @@
 # Sans --domain, l'API répond en HTTP sur http://<IP_PUBLIQUE>.
 # Pour activer HTTPS ensuite, relancez le script sur la VM :
 #   sudo /opt/gestimmo/deploy/install.sh --domain api.example.com --email moi@example.com
+#
+# Micro-VM AMD (1 Go de RAM, quand l'Ampere A1 est en rupture de capacité) :
+#   ajoutez --sqlite à la commande ci-dessus, ou exécutez directement
+#   sudo /opt/gestimmo/deploy/install.sh --sqlite
 
 package_update: true
 packages:

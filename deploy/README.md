@@ -26,8 +26,10 @@ HeatWave 50 Go : tout est Always Free, sans date de fin.
 ### 1. Créer la VM
 
 1. <https://cloud.oracle.com/free> → compte (carte bancaire pour vérifier
-   l'identité, 0 € débité sur l'Always Free). Région d'accueil :
-   **Johannesburg** (la plus proche de Madagascar).
+   l'identité, 0 € débité sur l'Always Free). Pour la **région d'accueil**,
+   prenez la plus proche ** parmi celles proposées** — Johannesburg si elle
+   apparaît, sinon Dubai, Jeddah, Casablanca ou Paris (voir la section
+   « Quelle région d'accueil choisir » plus bas).
 2. **Compute → Instances → Create instance** :
    - image **Ubuntu 24.04**, architecture **aarch64** ;
    - shape **VM.Standard.A1.Flex**, 2 OCPU / 12 Go ;
@@ -64,9 +66,83 @@ cd gestimmo
 sudo ./deploy/install.sh                 # HTTP sur http://<IP>/
 # ou
 sudo ./deploy/install.sh --domain api.example.com --email moi@example.com
+# ou, sur une VM 1 Go de RAM (micro AMD) : API + SQLite, sans MySQL
+sudo ./deploy/install.sh --sqlite --domain api.example.com --email moi@example.com
 ```
 
 Le script est idempotent : relancez-le pour mettre à jour (git pull + rebuild).
+
+## Quelle région d'accueil choisir (si Johannesburg n'apparaît pas)
+
+Lors de l'inscription, Oracle demande un **pays/territoire** puis propose une
+**région d'accueil** (home region). La liste proposée est filtrée : elle dépend
+du pays/territoire saisi et de la disponibilité du moment. Oracle l'écrit
+noir sur blanc dans sa FAQ :
+
+> « If your first-choice data region isn't available, please select an
+> adjacent region. »
+> — [FAQ Oracle Cloud Free Tier](https://www.oracle.com/cloud/free/faq/)
+
+Autrement dit : **si Johannesburg n'est pas dans la liste, prenez la région
+offerte la plus proche**. Ce n'est pas bloquant, cela ne change rien au
+caractère gratuit des ressources.
+
+### Régions à privilégier, dans l'ordre
+
+| Priorité | Région | Identifiant | Latence indicative depuis Antananarivo* |
+|---|---|---|---|
+| 1 | South Africa Central (Johannesburg) | `af-johannesburg-1` | ~40–70 ms |
+| 2 | UAE East (Dubai) | `me-dubai-1` | ~120–180 ms |
+| 3 | Saudi Arabia West (Jeddah) | `me-jeddah-1` | ~150–200 ms |
+| 4 | Morocco West (Casablanca) | `af-casablanca-1` | ~200–260 ms |
+| 5 | France Central (Paris) / France South (Marseille) | `eu-paris-1` / `eu-marseille-1` | ~180–250 ms |
+| 6 | Germany Central (Frankfurt) / Italy Northwest (Milan) | `eu-frankfurt-1` / `eu-milan-1` | ~200–260 ms |
+
+\* Ordres de grandeur, à mesurer depuis votre connexion : `ping` vers l'IP de
+la VM une fois créée. Une différence de 100 ms est invisible pour une API
+appelée par un frontend, perceptible seulement sur des enchaînements de
+requêtes.
+
+### Trois règles à connaître avant de valider
+
+1. **La région d'accueil est définitive.** Elle ne peut pas être changée après
+   la création du compte, et les ressources Always Free n'existent que là.
+   Choisissez délibérément, mais ne créez pas plusieurs comptes pour « essayer »
+   (interdit par Oracle, risque de blocage définitif).
+2. **Ne modifiez pas votre adresse pour obtenir une région.** Une adresse ou
+   une carte incohérente entraîne un rejet de l'inscription.
+3. **Un compte inactif 30 jours peut être suspendu.** Ce « 30 jours » concerne
+   le *compte*, pas la durée des ressources : une sonde externe gratuite
+   (UptimeRobot, par exemple) qui appelle `/health` toutes les 30 minutes
+   suffit à maintenir l'activité.
+
+### Si le compte est déjà créé avec une autre région
+
+Gardez-le : la seule conséquence est la latence. Tout le reste de ce guide
+fonctionne à l'identique (les commandes ne dépendent pas de la région).
+
+### Si l'Ampere A1 (ARM) est « out of capacity »
+
+C'est fréquent, y compris à Johannesburg. Deux parades :
+
+- **Micro-VM AMD** : l'offre Always Free inclut aussi **2 VM AMD
+  1/8 OCPU / 1 Go** (`VM.Standard.E2.1.Micro`). 1 Go ne fait pas tourner
+  MySQL + l'API, mais fait très bien tourner **l'API avec SQLite** :
+
+  ```bash
+  sudo /opt/gestimmo/deploy/install.sh --sqlite --domain api.example.com --email moi@example.com
+  ```
+
+  La base SQLite vit dans le volume `sqlite_data` et les sauvegardes
+  quotidiennes continuent de fonctionner.
+- **Réessayer** plus tard, ou dans un autre domaine de disponibilité : la
+  capacité se libère par vagues.
+
+### Si vous n'avez pas de carte bancaire acceptée par Oracle
+
+Oracle refuse les cartes prépayées et virtuelles. Dans ce cas, l'option sans
+carte reste **Render (service web gratuit, permanent) + Aiven MySQL Free** :
+[`../backend/DEPLOIEMENT-RENDER-AIVEN.md`](../backend/DEPLOIEMENT-RENDER-AIVEN.md).
 
 ## Ce que le script installe
 

@@ -149,6 +149,8 @@ détectée avant le déploiement.
 | Trafic sortant | 10 To/mois |
 | MySQL HeatWave | **1 système, 1 ECPU, 50 Go de stockage + 50 Go de sauvegardes**, dans la région d'accueil |
 | Carte bancaire | Obligatoire pour vérifier l'identité (pas de carte virtuelle/prépayée), débit 0 € sur les ressources Always Free |
+| Région d'accueil | Définitive, choisie à l'inscription parmi celles proposées ; Always Free uniquement dans cette région |
+| Compte inactif | Un compte laissé inactif 30 jours peut être suspendu : une sonde `/health` toutes les 30 min l'évite |
 
 Sources : [Oracle Always Free](https://docs.oracle.com/en-us/iaas/Content/FreeTier/freetier_topic-Always_Free_Resources.htm),
 [MySQL HeatWave Always Free](https://blogs.oracle.com/mysql/introducing-heatwave-always-free),
@@ -157,9 +159,14 @@ Sources : [Oracle Always Free](https://docs.oracle.com/en-us/iaas/Content/FreeTi
 ### A.1 Créer le compte et la VM
 
 1. Créez un compte sur [cloud.oracle.com/free](https://cloud.oracle.com/free).
-   Choisissez **Johannesburg** (Afrique du Sud) comme région d'accueil : c'est
-   la région Oracle la plus proche de Madagascar. La région d'accueil est
-   définitive pour les ressources Always Free.
+   La **région d'accueil** proposée dépend du pays/territoire saisi et de la
+   disponibilité : Johannesburg n'apparaît pas toujours. Prenez alors la plus
+   proche parmi celles offertes — Dubai, Jeddah, Casablanca, puis Paris,
+   Marseille, Francfort ou Milan. Oracle le documente : « si votre région ne
+   est pas disponible, choisissez une région adjacente ». Ce choix est
+   **définitif** pour les ressources Always Free, mais il n'influence que la
+   latence et la capacité ARM. Détail et tableau des latences :
+   [`../deploy/README.md`](../deploy/README.md#quelle-région-daccueil-choisir-si-johannesburg-napparaît-pas).
 2. **Compute → Instances → Create instance** :
    - image **Ubuntu 24.04** (ou 22.04), architecture **aarch64** ;
    - shape **VM.Standard.A1.Flex**, 2 OCPU et 12 Go (tout le quota) ;
@@ -174,8 +181,17 @@ Sources : [Oracle Always Free](https://docs.oracle.com/en-us/iaas/Content/FreeTi
 ssh -i ~/.ssh/ma-cle ubuntu@<IP_PUBLIQUE>
 ```
 
-Si Oracle répond « Out of host capacity » : réessayez plus tard, changez de
-domaine de disponibilité, ou créez une VM 1 OCPU puis redimensionnez.
+Si Oracle répond « Out of host capacity » (fréquent sur A1, y compris à
+Johannesburg) : réessayez plus tard, changez de domaine de disponibilité, ou
+utilisez les **2 micro-VM AMD de 1 Go** incluses dans l'offre gratuite avec la
+variante SQLite :
+
+```bash
+sudo /opt/gestimmo/deploy/install.sh --sqlite --domain api.example.com --email moi@example.com
+```
+
+MySQL 8.4 + l'API ne tiennent pas dans 1 Go de RAM ; SQLite, si
+(`backend/docker-compose.sqlite.yml`).
 
 ### A.2 Déploiement automatique (recommandé)
 
