@@ -225,7 +225,8 @@ pas les suivantes :
 
 ## 8. Ce que le serveur ne peut pas faire sur Vercel
 
-Trois limites de la plateforme s'imposent au code, pas à la configuration :
+Trois limites de la plateforme s'imposent au code, pas à la configuration. Une
+quatrième contrainte, elle, découle du stockage facturé :
 
 **1. Les fichiers de plus de 4,5 Mo ne peuvent pas traverser l'API.**
 Vercel répond `413 FUNCTION_PAYLOAD_TOO_LARGE` avant même d'atteindre FastAPI.
@@ -245,6 +246,31 @@ concernés.
 Tout ce qui n'est pas répliqué dans Blob est perdu. C'est précisément le rôle de
 la façade `app/services/file_storage.py` : chaque écriture est suivie d'un
 `mirror()` vers le store, et la référence persistée en base devient l'URL Blob.
+
+**4. Les objets Blob orphelins restent facturés.**
+Quand un bail est modifié, qu'une clause est ajoutée ou retirée,
+`app/routes/leases.py` incrémente `contract_version` et remet
+`lease.document_storage_path` à `None` : le contrat PDF est invalidé en base,
+mais le fichier n'est pas supprimé. C'est un comportement **antérieur à cette
+adaptation** (le fichier restait déjà sur le disque local) et il a été conservé
+tel quel : il s'agit de contrats, et une piste d'audit matérielle peut être
+préférable à une suppression. La différence sur Vercel est que l'objet continue
+d'occuper du stockage Blob facturé, sans plus être référencé nulle part.
+
+Pour récupérer cet espace, listez le store et comparez aux références en base
+(au-delà de 1 000 objets, recommencez en passant le `cursor` renvoyé) :
+
+```bash
+curl -s "https://vercel.com/api/blob?limit=1000" \
+  -H "authorization: Bearer $BLOB_READ_WRITE_TOKEN" \
+  -H "x-vercel-blob-store-id: $BLOB_STORE_ID" \
+  -H "x-api-version: 13"
+```
+
+Si vous préférez supprimer le document dès son invalidation, appelez
+`file_storage.delete(reference)` juste avant la remise à `None` dans les trois
+sites concernés — la façade gère les deux moteurs et ignore silencieusement une
+référence déjà absente.
 
 Par ailleurs, la limitation de débit reste **par instance** (compteur en
 mémoire) : elle ne remplace pas un compteur partagé. Pour une protection réelle,
