@@ -386,8 +386,13 @@ cd backend
 docker compose -f docker-compose.mysql.yml up -d --build
 ```
 
-Deux guides :
+Trois points d'entrée :
 
+- **déploiement automatisé sur un serveur Always Free** (aucune limite de
+  30 jours) : [`deploy/install.sh`](deploy/install.sh) + [`deploy/README.md`](deploy/README.md).
+  Une commande installe Docker, MySQL 8.4, l'API derrière Caddy (HTTPS
+  automatique) et la sauvegarde quotidienne :
+  `sudo ./deploy/install.sh --domain api.example.com --email moi@example.com` ;
 - **déploiement pas à pas sur Render + Aiven MySQL** (gratuit, sans carte) :
   [`backend/DEPLOIEMENT-RENDER-AIVEN.md`](backend/DEPLOIEMENT-RENDER-AIVEN.md) ;
 - comparatif des hébergements gratuits (Oracle Cloud Always Free, Render,

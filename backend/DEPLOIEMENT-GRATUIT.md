@@ -13,11 +13,17 @@ ajoutée au backend.
 
 ## 1. En bref : trois combinaisons
 
-| # | Hébergement | Base MySQL | Coût | Mise en place | Limite principale |
-|---|---|---|---|---|---|
-| **A** | **Oracle Cloud Always Free** — VM ARM 2 OCPU / 12 Go, 200 Go de disque | **MySQL HeatWave Always Free** (50 Go) ou MySQL 8.4 en Docker sur la VM | 0 € | 1 à 2 h | Carte bancaire pour vérifier l'identité ; capacité ARM parfois indisponible |
-| **B** | **Render Free** (Docker) — 512 Mo, 0,1 CPU | **Aiven MySQL Free** — 1 Go | 0 € | 20 à 30 min | Mise en veille après 15 min ; disque éphémère ; 5 Go de trafic/mois |
-| **C** | **Google Cloud Run** — 2 M requêtes/mois | **Aiven MySQL** ou **TiDB Cloud Starter** | 0 € | 1 h | Carte bancaire obligatoire ; disque éphémère ; 1 Go d'egress gratuit |
+| # | Hébergement | Base MySQL | Coût | Durée | Mise en place | Limite principale |
+|---|---|---|---|---|---|---|
+| **A** | **Oracle Cloud Always Free** — VM ARM 2 OCPU / 12 Go, 200 Go de disque | **MySQL HeatWave Always Free** (50 Go) ou MySQL 8.4 en Docker sur la VM | 0 € | **sans limite** | 1 à 2 h (ou ~10 min avec `deploy/cloud-init.yaml`) | Carte bancaire pour vérifier l'identité ; capacité ARM parfois indisponible |
+| **B** | **Render Free** (Docker) — 512 Mo, 0,1 CPU | **Aiven MySQL Free** — 1 Go | 0 € | **sans limite** (le service web n'expire pas) | 20 à 30 min | Mise en veille après 15 min ; disque éphémère ; 5 Go de trafic/mois |
+| **C** | **Google Cloud Run** — 2 M requêtes/mois | **Aiven MySQL** ou **TiDB Cloud Starter** | 0 € | **sans limite** (quota mensuel) | 1 h | Carte bancaire obligatoire ; disque éphémère ; 1 Go d'egress gratuit |
+
+> ⚠️ **La seule offre « 30 jours » du lot est le PostgreSQL gratuit de
+> Render** : il expire 30 jours après sa création, puis il est supprimé après
+> 14 jours de grâce. Aucune des combinaisons ci-dessus ne l'utilise (base
+> MySQL externe ou MySQL local). Voir
+> [`../deploy/README.md`](../deploy/README.md) pour le tableau des durées.
 
 **Recommandation**
 
@@ -171,7 +177,26 @@ ssh -i ~/.ssh/ma-cle ubuntu@<IP_PUBLIQUE>
 Si Oracle répond « Out of host capacity » : réessayez plus tard, changez de
 domaine de disponibilité, ou créez une VM 1 OCPU puis redimensionnez.
 
-### A.2 Installer Docker et lancer la stack
+### A.2 Déploiement automatique (recommandé)
+
+Copiez [`../deploy/cloud-init.yaml`](../deploy/cloud-init.yaml) dans le champ
+**Cloud-init script** de la création d'instance (après avoir remplacé `main`
+par la branche à déployer) : la VM installe Docker, Caddy, génère les clés,
+démarre la stack et programme la sauvegarde. Suivi :
+
+```bash
+ssh ubuntu@<IP_PUBLIQUE> 'sudo tail -f /var/log/gestimmo-install.log'
+```
+
+Pour tout autre serveur Ubuntu/Debian, une seule commande :
+
+```bash
+sudo ./deploy/install.sh --domain api.example.com --email moi@example.com
+```
+
+La suite de cette section décrit la procédure manuelle, équivalente.
+
+### A.2bis Installer Docker et lancer la stack manuellement
 
 ```bash
 sudo apt-get update

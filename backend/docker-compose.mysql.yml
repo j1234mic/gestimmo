@@ -21,7 +21,10 @@ services:
       MYSQL_PASSWORD: immo_password_2024
       MYSQL_ROOT_PASSWORD: immo_root_password_2024
     ports:
-      - "3306:3306"
+      # Par défaut, MySQL n'écoute que sur la boucle locale de l'hôte : le
+      # conteneur API le joint par le réseau interne du compose, et la base
+      # n'est jamais exposée à Internet.
+      - "${MYSQL_BIND:-127.0.0.1}:3306:3306"
     volumes:
       - mysql_data:/var/lib/mysql
     healthcheck:
@@ -59,7 +62,8 @@ services:
       - AI_CHAT_API_KEY=${AI_CHAT_API_KEY:-}
       - AI_CHAT_TIMEOUT_SECONDS=${AI_CHAT_TIMEOUT_SECONDS:-25}
     ports:
-      - "8000:8000"
+      # En production derrière Caddy, mettez API_BIND=127.0.0.1 dans .env.
+      - "${API_BIND:-0.0.0.0}:8000:8000"
     volumes:
       - public_uploads:/app/uploads
       - private_uploads:/app/private_uploads

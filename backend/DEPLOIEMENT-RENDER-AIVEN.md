@@ -9,6 +9,11 @@ service toujours allumé avec disque persistant, voir l'option Oracle dans
 > Aiven de 1 Go, et 0 € de facture. En contrepartie : l'API s'endort après
 > 15 minutes sans trafic, redémarre en ~1 minute, et **les fichiers uploadés
 > sont perdus** à chaque redéploiement (disque éphémère).
+>
+> **Aucune limite de 30 jours** : le service web Render gratuit n'expire pas,
+> et Aiven MySQL Free est gratuit sans échéance. Seul le **PostgreSQL** gratuit
+> de Render expire à 30 jours — il n'est pas utilisé ici. Tableau complet des
+> durées : [`../deploy/README.md`](../deploy/README.md).
 
 ### Le résumé en 5 étapes
 
