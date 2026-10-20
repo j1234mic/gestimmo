@@ -1,7 +1,6 @@
 """API de gestion interne des fiches et du suivi locataire."""
 
 import hashlib
-import os
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -10,12 +9,13 @@ from typing import Optional
 import aiofiles
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import StreamingResponse
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.auth import require_read, require_write
 from app.config import settings
+from app.services import file_storage
 from app.core.tenant_security import hash_portal_password
 from app.database import get_db
 from app.models.property import Property
@@ -483,13 +483,18 @@ async def upload_guarantor_document(
     path = directory / f"{uuid.uuid4().hex}.{extension}"
     async with aiofiles.open(path, "wb") as output:
         await output.write(content)
+    # L'OCR lit le fichier local fraîchement écrit ; la référence persistée
+    # pointe vers le stockage objet quand il est actif.
     analysis = await run_in_threadpool(analyse_document, str(path), document_type, guarantor.first_name, guarantor.last_name)
+    guarantor_reference = file_storage.reference_for(
+        path, file_storage.mirror(path, content_type=file.content_type)
+    )
     document = TenantDocument(
         tenant_id=tenant.id,
         guarantor_id=guarantor.id,
         document_type=document_type,
         original_filename=Path(file.filename or "document").name,
-        storage_path=str(path),
+        storage_path=guarantor_reference,
         url="private",
         mime_type=file.content_type,
         file_size=len(content),
@@ -523,9 +528,16 @@ def download_guarantor_document(tenant_id: int, guarantor_id: int, document_id: 
         TenantDocument.tenant_id == tenant_id,
         TenantDocument.guarantor_id == guarantor_id,
     ).first()
-    if not document or not os.path.isfile(document.storage_path):
+    if not document:
         raise HTTPException(status_code=404, detail="Document non trouvé")
-    return FileResponse(document.storage_path, media_type=document.mime_type, filename=document.original_filename)
+    try:
+        return file_storage.response(
+            document.storage_path,
+            media_type=document.mime_type,
+            filename=document.original_filename,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Document non trouvé") from exc
 
 
 @router.post("/{tenant_id}/leases", status_code=201)
@@ -569,9 +581,12 @@ async def upload_lease_document(tenant_id: int, lease_id: int, file: UploadFile 
     path = directory / f"{uuid.uuid4().hex}.pdf"
     async with aiofiles.open(path, "wb") as output:
         await output.write(content)
-    if lease.document_storage_path and os.path.isfile(lease.document_storage_path):
-        os.remove(lease.document_storage_path)
-    lease.document_storage_path = str(path)
+    lease_reference = file_storage.reference_for(
+        path, file_storage.mirror(path, content_type="application/pdf")
+    )
+    # L'ancien bail (chemin local ou objet distant) est retiré du stockage.
+    file_storage.delete(lease.document_storage_path)
+    lease.document_storage_path = lease_reference
     lease.document_url = f"/api/tenants/{tenant_id}/leases/{lease.id}/document"
     db.commit()
     return {"message": "Bail enregistré", "document_url": lease.document_url}
@@ -581,9 +596,16 @@ async def upload_lease_document(tenant_id: int, lease_id: int, file: UploadFile 
 def download_lease_document(tenant_id: int, lease_id: int, db: Session = Depends(get_db), current_user=Depends(require_read)):
     _tenant_or_404(db, tenant_id)
     lease = db.query(Lease).filter(Lease.id == lease_id, Lease.tenant_id == tenant_id).first()
-    if not lease or not lease.document_storage_path or not os.path.isfile(lease.document_storage_path):
+    if not lease or not lease.document_storage_path:
         raise HTTPException(status_code=404, detail="Document de bail non trouvé")
-    return FileResponse(lease.document_storage_path, media_type="application/pdf", filename=f"bail-{lease.reference}.pdf")
+    try:
+        return file_storage.response(
+            lease.document_storage_path,
+            media_type="application/pdf",
+            filename=f"bail-{lease.reference}.pdf",
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Document de bail non trouvé") from exc
 
 
 @router.post("/{tenant_id}/payments", status_code=201)

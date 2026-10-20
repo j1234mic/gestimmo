@@ -17,6 +17,7 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.config import settings
+from app.services import file_storage
 from app.models.communication import (
     AutomationRun,
     AutomationScenario,
@@ -487,10 +488,14 @@ def add_attachment(
     suffix = Path(filename).suffix or ".bin"
     stored = directory / f"{uuid.uuid4().hex}{suffix}"
     stored.write_bytes(content)
+    # Référence durable : URL Vercel Blob quand le stockage objet est actif.
+    reference = file_storage.reference_for(
+        stored, file_storage.mirror(stored, content_type=mime_type)
+    )
     attachment = MessageAttachment(
         message_id=message.id,
         filename=filename,
-        storage_path=str(stored),
+        storage_path=reference,
         mime_type=mime_type,
         file_size=len(content),
     )

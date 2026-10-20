@@ -1,7 +1,6 @@
 """API du module 4 : création, documents, révisions et cycle de vie des baux."""
 
 import hashlib
-import os
 import uuid
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -9,12 +8,12 @@ from typing import Optional
 
 import aiofiles
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
-from fastapi.responses import FileResponse
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.auth import require_read, require_write
 from app.config import settings
+from app.services import file_storage
 from app.database import get_db
 from app.models.lease_contract import (
     ArchiveStatus,
@@ -99,13 +98,16 @@ def _settings_or_404(db: Session, lease_id: int) -> LeaseContractSettings:
 
 
 def _document_integrity_ok(document: ContractDocument) -> bool:
-    if not os.path.isfile(document.storage_path):
+    """Vérifie l'empreinte d'un document contractuel, local ou distant.
+
+    Le document archivé peut résider dans Vercel Blob : le contrôle d'intégrité
+    doit donc passer par la façade de stockage plutôt que par ``open()``.
+    """
+    try:
+        content = file_storage.read_bytes(document.storage_path)
+    except (FileNotFoundError, OSError, RuntimeError):
         return False
-    digest = hashlib.sha256()
-    with open(document.storage_path, "rb") as source:
-        for chunk in iter(lambda: source.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest() == document.checksum_sha256
+    return hashlib.sha256(content).hexdigest() == document.checksum_sha256
 
 
 def _document_view(document: ContractDocument) -> dict:
@@ -655,6 +657,9 @@ async def upload_document(
     path = directory / f"{uuid.uuid4().hex}.{extension}"
     async with aiofiles.open(path, "wb") as output:
         await output.write(content)
+    annexe_reference = file_storage.reference_for(
+        path, file_storage.mirror(path, content_type=file.content_type)
+    )
     try:
         retention_date = datetime.strptime(retention_until, "%Y-%m-%d").date() if retention_until else None
     except ValueError:
@@ -666,7 +671,7 @@ async def upload_document(
         document_type=document_type,
         title=title or Path(file.filename or "document").name,
         original_filename=Path(file.filename or "document").name,
-        storage_path=str(path),
+        storage_path=annexe_reference,
         mime_type=file.content_type,
         file_size=len(content),
         checksum_sha256=hashlib.sha256(content).hexdigest(),
@@ -691,11 +696,18 @@ def document_completeness(lease_id: int, db: Session = Depends(get_db), current_
 @router.get("/{lease_id}/documents/{document_id}/download")
 def download_document(lease_id: int, document_id: int, db: Session = Depends(get_db), current_user=Depends(require_read)):
     document = db.query(ContractDocument).filter(ContractDocument.id == document_id, ContractDocument.lease_id == lease_id).first()
-    if not document or document.archive_status == ArchiveStatus.DESTROYED or not os.path.isfile(document.storage_path):
+    if not document or document.archive_status == ArchiveStatus.DESTROYED:
         raise HTTPException(status_code=404, detail="Document non trouvé")
     if not _document_integrity_ok(document):
         raise HTTPException(status_code=409, detail="L'intégrité du document archivé ne peut pas être vérifiée")
-    return FileResponse(document.storage_path, media_type=document.mime_type, filename=document.original_filename or f"{document.reference}.pdf")
+    try:
+        return file_storage.response(
+            document.storage_path,
+            media_type=document.mime_type,
+            filename=document.original_filename or f"{document.reference}.pdf",
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Document non trouvé") from exc
 
 
 @router.put("/{lease_id}/documents/{document_id}/archive")
@@ -984,11 +996,16 @@ def public_signature_document(token: str, db: Session = Depends(get_db)):
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     document = party.envelope.document
-    if not os.path.isfile(document.storage_path):
-        raise HTTPException(status_code=404, detail="Document non trouvé")
     if not _document_integrity_ok(document):
         raise HTTPException(status_code=409, detail="L'intégrité du document à signer ne peut pas être vérifiée")
-    return FileResponse(document.storage_path, media_type=document.mime_type, filename=document.original_filename)
+    try:
+        return file_storage.response(
+            document.storage_path,
+            media_type=document.mime_type,
+            filename=document.original_filename,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Document non trouvé") from exc
 
 
 @signature_router.post("/{token}/sign")

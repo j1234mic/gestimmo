@@ -11,6 +11,7 @@ from app.database import get_db
 from app.auth import require_write, require_read
 from app.models.property import Property, PropertyDocument
 from app.config import settings
+from app.services import file_storage
 
 router = APIRouter(prefix="/api/properties/{property_id}/documents", tags=["Documents"])
 
@@ -106,8 +107,16 @@ async def upload_document(
     async with aiofiles.open(file_path, 'wb') as f:
         await f.write(content)
 
-    # ✅ URL stockée en base : relative au dossier uploads
-    stored_url = f"/uploads/{property_id}/documents/{unique_name}"
+    # ✅ URL stockée en base : URL Vercel Blob quand le stockage objet est
+    # actif, sinon chemin relatif au dossier uploads servi statiquement.
+    stored_url = file_storage.reference_for(
+        f"/uploads/{property_id}/documents/{unique_name}",
+        file_storage.mirror(
+            file_path,
+            f"public/{property_id}/documents/{unique_name}",
+            content_type=file.content_type,
+        ),
+    )
 
     # Créer l'entrée en base
     document = PropertyDocument(

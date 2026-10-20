@@ -21,7 +21,7 @@ from app.schemas.communication import (
     ScenarioUpdate,
     ThreadMessageCreate,
 )
-from app.services import communication_service
+from app.services import communication_service, file_storage
 
 router = APIRouter(prefix="/api/comms", tags=["Communication et notifications"])
 
@@ -143,13 +143,12 @@ def download_attachment(attachment_id: int, db: Session = Depends(get_db), curre
     attachment = db.query(MessageAttachment).filter(MessageAttachment.id == attachment_id).first()
     if not attachment:
         raise HTTPException(status_code=404, detail="Pièce jointe non trouvée")
-    from pathlib import Path
-
-    path = Path(attachment.storage_path)
-    if not path.is_file():
-        raise HTTPException(status_code=404, detail="Fichier introuvable")
+    try:
+        content = file_storage.read_bytes(attachment.storage_path)
+    except (FileNotFoundError, OSError, RuntimeError) as exc:
+        raise HTTPException(status_code=404, detail="Fichier introuvable") from exc
     return Response(
-        content=path.read_bytes(),
+        content=content,
         media_type=attachment.mime_type or "application/octet-stream",
         headers={"Content-Disposition": f'attachment; filename="{attachment.filename}"'},
     )

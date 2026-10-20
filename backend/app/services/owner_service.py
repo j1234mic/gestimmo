@@ -17,6 +17,7 @@ from reportlab.lib.units import cm
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 from app.config import settings
+from app.services import file_storage
 from app.models.owner import Owner, PropertyOwner, Mandate
 from app.schemas.owner import OwnerCreate, OwnerUpdate, MandateCreate, MandateSignatureRequest
 from app.hexagon.infrastructure.security.id_cipher import encrypt_id
@@ -224,7 +225,7 @@ def _save_signature_image(encoded: str, directory: Path) -> str:
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / f"{uuid.uuid4().hex}.{ext}"
     path.write_bytes(content)
-    return str(path)
+    return file_storage.reference_for(path, file_storage.mirror(path, content_type=f"image/{ext}"))
 
 
 def sign_mandate(db: Session, owner_id: int, mandate_id: int, data: MandateSignatureRequest,
@@ -278,7 +279,9 @@ def sign_mandate(db: Session, owner_id: int, mandate_id: int, data: MandateSigna
     mandate.status = "signed"
     mandate.signature_hash = signature_hash
     mandate.signature_document_hash = document_hash
-    mandate.signature_evidence_path = str(evidence_path)
+    mandate.signature_evidence_path = file_storage.reference_for(
+        evidence_path, file_storage.mirror(evidence_path, content_type="application/pdf")
+    )
     mandate.signature_image_path = image_path
     mandate.signature_consent_at = datetime.now(timezone.utc)
     mandate.signature_ip = ip

@@ -1,0 +1,85 @@
+# Dockerfile.vercel — image OCI servie par une Vercel Function (Fluid compute).
+#
+# Vercel détecte ce fichier à la racine du projet, construit l'image, la pousse
+# dans le Vercel Container Registry et route tout le trafic vers elle. Le
+# conteneur doit servir HTTP sur $PORT (80 par défaut).
+#
+# Pourquoi le chemin « conteneur » plutôt que le runtime Python natif :
+# ce dernier n'exécute pas de Dockerfile et ne permet donc pas d'installer
+# tesseract-ocr (module 16, OCR des justificatifs) ni postgresql-client /
+# default-mysql-client (module 12, sauvegardes pg_dump / mysqldump). Il impose
+# aussi Python 3.12+ alors que pydantic-core 2.14.5, psycopg2-binary 2.9.9,
+# uvloop 0.19.0 et httptools 0.6.1 n'ont aucune roue cp313.
+#
+# Variables à renseigner dans le projet Vercel (Settings → Environment Variables) :
+#   DATABASE_URL            base managée joignable en TLS (Neon, Aiven, TiDB…)
+#   SECRET_KEY              signe les jetons JWT
+#   SECURE_ID_KEY           clé Fernet des secure_id — À CONSERVER STABLE,
+#                           sinon les identifiants déjà stockés deviennent illisibles
+#   ALLOWED_ORIGINS         domaine(s) du frontend, séparés par des virgules
+#   BLOB_READ_WRITE_TOKEN   jeton du store Vercel Blob (Storage → Create → Blob)
+#   CRON_SECRET             jeton signé par les Cron Jobs Vercel
+#   PUBLIC_BASE_URL         URL publique de l'API (URL de retour paiement)
+FROM python:3.11-slim
+
+WORKDIR /app
+ENV PIP_DEFAULT_TIMEOUT=300 \
+    PIP_RETRIES=5 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+# ---------------------------------------------------------------------------
+# Adaptations serverless. Ces valeurs sont des défauts d'image : une variable
+# posée dans le tableau de bord Vercel les remplace (load_dotenv n'écrase rien).
+# ---------------------------------------------------------------------------
+# 1. Système de fichiers en lecture seule hors /tmp : les trois racines de
+#    stockage doivent pointer vers la seule zone inscriptible.
+ENV UPLOAD_DIR=/tmp/uploads \
+    PRIVATE_UPLOAD_DIR=/tmp/private_uploads \
+    BACKUP_DIR=/tmp/backups \
+    TMPDIR=/tmp
+# 2. Aucun FileHandler : /app n'est pas inscriptible et Vercel collecte stdout.
+ENV LOG_FILE=
+# 3. /tmp est effacé à la mise à l'échelle à zéro : les fichiers ne sont durables
+#    que répliqués dans le store objet (voir app/services/file_storage.py).
+ENV STORAGE_BACKEND=blob \
+    BLOB_ACCESS=public
+# 4. Aucune tâche de fond ne survit entre deux requêtes : la boucle asyncio de
+#    sauvegarde est remplacée par le Cron Job de vercel.json.
+ENV BACKUP_SCHEDULER_ENABLED=false
+# 5. L'IP cliente réelle est dans X-Forwarded-For (limitation de débit, audit).
+ENV TRUST_PROXY_HEADERS=true
+# 6. Production : pas de rechargement à chaud, pas de simulation de paiement.
+ENV ENVIRONMENT=production \
+    DEBUG=false \
+    LOG_LEVEL=INFO \
+    PAYMENT_SIMULATION_ENABLED=false
+# 7. Le schéma est créé au démarrage pour qu'un premier déploiement fonctionne
+#    sans étape manuelle. Passez AUTO_CREATE_TABLES=false en production après
+#    avoir initialisé la base une fois (scripts/init_schema.py) : create_all sur
+#    ~248 tables alourdit chaque cold start et deux instances qui démarrent
+#    ensemble peuvent se concurrencer sur les DDL.
+ENV AUTO_CREATE_TABLES=true
+
+# OCR français/anglais pour la vérification des justificatifs.
+# Clients PostgreSQL et MySQL pour les sauvegardes (pg_dump / mysqldump).
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        tesseract-ocr tesseract-ocr-fra postgresql-client default-mysql-client \
+    && rm -rf /var/lib/apt/lists/*
+
+# Le contexte de construction est la racine du dépôt : les chemins sont préfixés
+# par backend/. backend/.env est volontairement exclu (voir .dockerignore) pour
+# qu'aucun secret commité ne soit cuit dans l'image poussée sur le registre.
+COPY backend/requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir --default-timeout=300 -r /app/requirements.txt
+
+COPY backend/app/ /app/app/
+RUN mkdir -p /tmp/uploads /tmp/private_uploads /tmp/backups
+
+# Vercel attend un serveur HTTP sur $PORT (80 par défaut). --proxy-headers fait
+# remonter l'IP cliente réelle dans request.client.host, exploité par le journal
+# d'audit et la limitation de débit.
+ENV PORT=80
+EXPOSE 80
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-80} --proxy-headers --forwarded-allow-ips '*'"]

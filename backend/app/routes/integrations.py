@@ -7,12 +7,12 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, Response, UploadFile
-from fastapi.responses import StreamingResponse
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.auth import GranularPermissionChecker
 from app.database import get_db
+from app.services import file_storage
 from app.models.integration import (
     APICredential,
     DataTransferJob,
@@ -479,11 +479,14 @@ def transfer_jobs(
 @router.get("/transfers/{job_id}/download")
 def download_export(job_id: int, db: Session = Depends(get_db), user=Depends(integration_read)):
     row = db.query(DataTransferJob).filter(DataTransferJob.id == job_id, DataTransferJob.operation == "export").first()
-    if not row or not row.output_path or not Path(row.output_path).is_file():
+    if not row or not row.output_path:
         raise HTTPException(status_code=404, detail="Export introuvable")
-    path = Path(row.output_path)
-    media = {".csv": "text/csv", ".json": "application/json", ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}.get(path.suffix, "application/octet-stream")
-    return StreamingResponse(path.open("rb"), media_type=media, headers={"Content-Disposition": f'attachment; filename="{path.name}"'})
+    name = Path(row.output_path).name
+    media = {".csv": "text/csv", ".json": "application/json", ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}.get(Path(row.output_path).suffix, "application/octet-stream")
+    try:
+        return file_storage.response(row.output_path, media_type=media, filename=name)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Export introuvable") from exc
 
 
 # ---------------------------------------------------------------------------

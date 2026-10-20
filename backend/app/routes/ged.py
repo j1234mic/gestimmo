@@ -22,7 +22,7 @@ from app.schemas.ged import (
     TemplateCreate,
     TemplateUpdate,
 )
-from app.services import ged_service
+from app.services import file_storage, ged_service
 
 router = APIRouter(prefix="/api/ged", tags=["Gestion documentaire"])
 
@@ -263,12 +263,16 @@ def download_document(document_id: int, db: Session = Depends(get_db), current_u
         document = ged_service.get_document(db, document_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
-    if not document.storage_path or not Path(document.storage_path).is_file():
+    if not document.storage_path:
         raise HTTPException(status_code=404, detail="Fichier introuvable")
+    try:
+        content = file_storage.read_bytes(document.storage_path)
+    except (FileNotFoundError, OSError, RuntimeError) as exc:
+        raise HTTPException(status_code=404, detail="Fichier introuvable") from exc
     ged_service.log_audit(db, document.id, "download", current_user.email, _role(current_user))
     db.commit()
     return Response(
-        content=Path(document.storage_path).read_bytes(),
+        content=content,
         media_type=document.mime_type or "application/octet-stream",
         headers={"Content-Disposition": f'attachment; filename="{document.original_filename or "document"}"'},
     )
@@ -313,7 +317,14 @@ def rerun_ocr(document_id: int, db: Session = Depends(get_db), current_user=Depe
         raise HTTPException(status_code=404, detail=str(exc))
     if not document.storage_path:
         raise HTTPException(status_code=400, detail="Aucun fichier à analyser")
-    ged_service.apply_ocr(document, Path(document.storage_path))
+    # pytesseract/pypdf exigent un chemin : un objet distant est rapatrié dans un
+    # fichier temporaire, supprimé après analyse.
+    local = file_storage.materialize(document.storage_path)
+    try:
+        ged_service.apply_ocr(document, local)
+    finally:
+        if local != Path(document.storage_path):
+            file_storage.discard_temporary(local)
     ged_service.log_audit(db, document.id, "classify", current_user.email, _role(current_user))
     db.commit()
     return ged_service.document_view(document, include_ocr=True)

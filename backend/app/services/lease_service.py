@@ -23,6 +23,7 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.config import settings
+from app.services import file_storage
 from app.models.lease_contract import (
     ArchiveStatus,
     ContractDocument,
@@ -392,6 +393,9 @@ def store_contract_document(
     path = directory / filename
     path.write_bytes(content)
     checksum = hashlib.sha256(content).hexdigest()
+    document_reference = file_storage.reference_for(
+        path, file_storage.mirror(path, content_type="application/pdf")
+    )
     version = db.query(ContractDocument).filter(
         ContractDocument.lease_id == lease_id,
         ContractDocument.document_type == document_type,
@@ -402,7 +406,7 @@ def store_contract_document(
         document_type=document_type,
         title=title,
         original_filename=original_filename or filename,
-        storage_path=str(path),
+        storage_path=document_reference,
         mime_type="application/pdf",
         file_size=len(content),
         checksum_sha256=checksum,
@@ -896,7 +900,10 @@ def decode_signature_image(encoded: str, directory: Path) -> tuple[str, str]:
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / f"{uuid.uuid4().hex}.{extension}"
     path.write_bytes(content)
-    return str(path), hashlib.sha256(content).hexdigest()
+    signature_reference = file_storage.reference_for(
+        path, file_storage.mirror(path, content_type=f"image/{extension}")
+    )
+    return signature_reference, hashlib.sha256(content).hexdigest()
 
 
 def create_signature_envelope(db: Session, lease: Lease, document: ContractDocument, data, actor: str) -> tuple[SignatureEnvelope, list[dict]]:
@@ -1026,8 +1033,12 @@ def complete_signature(db: Session, party: SignatureParty, typed_signature: str,
     )
     if prior_pending:
         raise ValueError("Le signataire précédent doit signer avant vous")
-    signed_document = Path(party.envelope.document.storage_path)
-    if not signed_document.is_file() or hashlib.sha256(signed_document.read_bytes()).hexdigest() != party.envelope.document.checksum_sha256:
+    # Le document peut être un chemin local ou une URL Vercel Blob.
+    try:
+        signed_bytes = file_storage.read_bytes(party.envelope.document.storage_path)
+    except (FileNotFoundError, OSError):
+        raise ValueError("L'intégrité du document à signer ne peut pas être vérifiée")
+    if hashlib.sha256(signed_bytes).hexdigest() != party.envelope.document.checksum_sha256:
         raise ValueError("L'intégrité du document à signer ne peut pas être vérifiée")
     path = None
     if signature_image_base64:

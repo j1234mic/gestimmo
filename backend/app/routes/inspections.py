@@ -1,7 +1,6 @@
 """États des lieux : saisie mobile, photos, comparaison, retenues et PDF."""
 
 import hashlib
-import os
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -9,11 +8,11 @@ from typing import Optional
 
 import aiofiles
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from app.auth import require_read, require_write
 from app.config import settings
+from app.services import file_storage
 from app.database import get_db
 from app.models.lease_contract import (
     ArchiveStatus,
@@ -413,12 +412,15 @@ async def upload_photo(
     path = directory / f"{uuid.uuid4().hex}.{extension}"
     async with aiofiles.open(path, "wb") as output:
         await output.write(content)
+    photo_reference = file_storage.reference_for(
+        path, file_storage.mirror(path, content_type=file.content_type)
+    )
     photo = InspectionPhoto(
         inspection_id=inspection.id,
         room_id=room_id,
         item_id=item_id,
         original_filename=Path(file.filename or "photo").name,
-        storage_path=str(path),
+        storage_path=photo_reference,
         mime_type=file.content_type,
         checksum_sha256=hashlib.sha256(content).hexdigest(),
         captured_at=captured_at,
@@ -441,9 +443,14 @@ async def upload_photo(
 @router.get("/{inspection_id}/photos/{photo_id}/download")
 def download_photo(lease_id: int, inspection_id: int, photo_id: int, db: Session = Depends(get_db), current_user=Depends(require_read)):
     photo = db.query(InspectionPhoto).filter(InspectionPhoto.id == photo_id, InspectionPhoto.inspection_id == inspection_id).first()
-    if not photo or not os.path.isfile(photo.storage_path):
+    if not photo:
         raise HTTPException(status_code=404, detail="Photo non trouvée")
-    return FileResponse(photo.storage_path, media_type=photo.mime_type, filename=photo.original_filename)
+    try:
+        return file_storage.response(
+            photo.storage_path, media_type=photo.mime_type, filename=photo.original_filename
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Photo non trouvée") from exc
 
 
 @router.post("/{inspection_id}/compare")

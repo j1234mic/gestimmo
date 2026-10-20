@@ -1,6 +1,5 @@
 """API du module 6 : maintenance et travaux."""
 
-import os
 import uuid
 from datetime import date, datetime
 from pathlib import Path
@@ -8,11 +7,11 @@ from typing import Optional
 
 import aiofiles
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from app.auth import require_read, require_write
 from app.config import settings
+from app.services import file_storage
 from app.database import get_db
 from app.models.maintenance import (
     Equipment,
@@ -348,8 +347,11 @@ async def upload_ticket_attachment(
     path = directory / f"{uuid.uuid4().hex}.{extension}"
     async with aiofiles.open(path, "wb") as output:
         await output.write(content)
+    attachment_reference = file_storage.reference_for(
+        path, file_storage.mirror(path, content_type=file.content_type)
+    )
     try:
-        attachment = attach_file(db, ticket_id, str(path), file.filename or f"attachment.{extension}", file.content_type, len(content), caption)
+        attachment = attach_file(db, ticket_id, attachment_reference, file.filename or f"attachment.{extension}", file.content_type, len(content), caption)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return {"id": attachment.id, "file": attachment.original_filename, "mime_type": attachment.mime_type}
@@ -359,9 +361,16 @@ async def upload_ticket_attachment(
 def download_ticket_attachment(ticket_id: int, attachment_id: int, db: Session = Depends(get_db), current_user=Depends(require_read)):
     from app.models.maintenance import TicketAttachment
     attachment = db.query(TicketAttachment).filter(TicketAttachment.id == attachment_id, TicketAttachment.ticket_id == ticket_id).first()
-    if not attachment or not os.path.isfile(attachment.storage_path):
+    if not attachment:
         raise HTTPException(status_code=404, detail="Pièce jointe non trouvée")
-    return FileResponse(attachment.storage_path, media_type=attachment.mime_type, filename=attachment.original_filename)
+    try:
+        return file_storage.response(
+            attachment.storage_path,
+            media_type=attachment.mime_type,
+            filename=attachment.original_filename,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Pièce jointe non trouvée") from exc
 
 
 @router.post("/tickets/escalate")
@@ -521,7 +530,10 @@ async def upload_work_document(
     path = directory / f"{uuid.uuid4().hex}.{extension}"
     async with aiofiles.open(path, "wb") as output:
         await output.write(content)
-    document = add_work_document(db, project_id, document_type, title or file.filename, str(path), file.filename or f"doc.{extension}", file.content_type, len(content))
+    work_reference = file_storage.reference_for(
+        path, file_storage.mirror(path, content_type=file.content_type)
+    )
+    document = add_work_document(db, project_id, document_type, title or file.filename, work_reference, file.filename or f"doc.{extension}", file.content_type, len(content))
     return {"id": document.id, "document_type": document_type.value, "title": document.title}
 
 

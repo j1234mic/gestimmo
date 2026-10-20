@@ -40,6 +40,7 @@ from app.routes.public_portal import router as public_portal_router
 from app.routes.ai_automation import router as ai_router, tenant_router as tenant_ai_router
 from app.routes.integrations import router as integrations_router, external_router as external_api_router
 from app.routes.subscriptions import router as subscriptions_router
+from app.routes.cron import router as cron_router
 from app.routes import owner_portal, communication
 # Architecture hexagonale : routeurs v2 (Properties / Owners).
 from app.hexagon.web.property_router import router as properties_v2_router
@@ -137,6 +138,10 @@ app.include_router(communication.router)
 # Module « Abonnements & revenus récurrents »
 app.include_router(subscriptions_router)
 
+# Tâches périodiques appelées par le planificateur de la plateforme
+# (Vercel Cron Jobs, cron externe, GitHub Actions schedule).
+app.include_router(cron_router)
+
 # Routeurs hexagonaux (v2) — pilotés par les cas d'usage, sans logique ORM
 # dans les routes. Ils coexistent avec les routeurs historiques.
 app.include_router(properties_v2_router)
@@ -145,15 +150,54 @@ app.include_router(owners_v2_router)
 # Seuls les médias publics historiques sont servis statiquement. Les dossiers
 # locataires sont conservés dans PRIVATE_UPLOAD_DIR et passent par des routes
 # authentifiées de téléchargement.
-os.makedirs(settings.upload_dir_path, exist_ok=True)
-os.makedirs(settings.private_upload_dir_path, exist_ok=True)
-os.makedirs(settings.backup_dir_path, exist_ok=True)
-app.mount("/uploads", StaticFiles(directory=str(settings.upload_dir_path)), name="uploads")
+#
+# Sur Vercel le système de fichiers est en lecture seule hors /tmp : ces
+# variables doivent pointer vers /tmp (voir Dockerfile.vercel). La création est
+# tolérante aux échecs pour qu'un volume non inscriptible dégrade le stockage au
+# lieu d'empêcher l'application de démarrer — un 500 sur /health masquerait la
+# cause réelle.
+def _prepare_storage_dirs() -> list[str]:
+    """Crée les racines de stockage et renvoie la liste des échecs."""
+    failures: list[str] = []
+    for label, directory in (
+        ("UPLOAD_DIR", settings.upload_dir_path),
+        ("PRIVATE_UPLOAD_DIR", settings.private_upload_dir_path),
+        ("BACKUP_DIR", settings.backup_dir_path),
+    ):
+        try:
+            os.makedirs(directory, exist_ok=True)
+        except OSError as exc:
+            failures.append(label)
+            app_logger.error(
+                "❌ Racine de stockage %s=%s non créable (%s).\n"
+                "   Sur Vercel le système de fichiers est en lecture seule : seul /tmp "
+                "est inscriptible. Définissez %s=/tmp/... ou activez STORAGE_BACKEND=blob.",
+                label, directory, exc, label,
+            )
+    return failures
+
+
+_storage_dir_failures = _prepare_storage_dirs()
+
+# En stockage Blob, les médias sont servis par le CDN Vercel via leur URL :
+# monter un dossier local vide ne ferait que renvoyer des 404 trompeurs.
+if not settings.blob_enabled and "UPLOAD_DIR" not in _storage_dir_failures:
+    app.mount("/uploads", StaticFiles(directory=str(settings.upload_dir_path)), name="uploads")
+elif settings.blob_enabled:
+    app_logger.info("📦 Stockage Vercel Blob actif : /uploads n'est pas monté (médias servis par le store).")
+
 
 # Endpoints de base
 @app.get("/health")
 async def health():
-    return {"status": "healthy"}
+    from app.services import file_storage
+
+    return {
+        "status": "healthy",
+        "storage": file_storage.describe_backend(),
+        "internal_backup_scheduler": settings.BACKUP_SCHEDULER_ENABLED,
+        "writable_storage_dirs": not _storage_dir_failures,
+    }
 
 @app.get("/")
 async def root():
@@ -279,7 +323,19 @@ async def startup():
                 service_hint,
             )
             raise RuntimeError(f"Connexion impossible à la base de données ({db_host}) : {exc.orig}") from exc
-    app.state.backup_task = asyncio.create_task(_backup_scheduler())
+
+    # La boucle asyncio suppose un processus permanent. Sur Vercel l'instance est
+    # gelée entre les requêtes puis détruite après ~5 min d'inactivité : la tâche
+    # ne se réveille jamais. On la remplace par un Cron Job qui appelle
+    # GET /api/cron/daily avec Authorization: Bearer $CRON_SECRET.
+    if settings.BACKUP_SCHEDULER_ENABLED:
+        app.state.backup_task = asyncio.create_task(_backup_scheduler())
+    else:
+        app.state.backup_task = None
+        app_logger.info(
+            "⏱️  Planificateur interne désactivé (BACKUP_SCHEDULER_ENABLED=false) : "
+            "les sauvegardes quotidiennes doivent être déclenchées par GET /api/cron/daily."
+        )
     app_logger.info("🚀 API démarrée !")
 
 
