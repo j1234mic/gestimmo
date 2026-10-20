@@ -12,7 +12,21 @@ load_dotenv(_ENV_FILE)
 
 # Hôtes qui n'existent que dans le réseau docker-compose (noms de services).
 # Ils ne sont résolubles qu'à l'intérieur des conteneurs, jamais sur la machine hôte.
-COMPOSE_ONLY_HOSTS = {"postgres", "db"}
+COMPOSE_ONLY_HOSTS = {"postgres", "db", "mysql", "mariadb"}
+
+# SQLAlchemy ne fournit aucun connecteur MySQL : le schéma d'URL écrit par les
+# hébergeurs (`mysql://…`, `mariadb://…`, `mysql+mysqldb://…`) est réécrit vers
+# PyMySQL, le pilote pur Python déclaré dans requirements.txt. Sans cela,
+# SQLAlchemy tenterait de charger MySQLdb, absent de l'image Docker.
+MYSQL_SCHEME_PREFIXES = {"mysql", "mariadb"}
+
+
+def normalize_mysql_scheme(scheme: str) -> str:
+    """Force PyMySQL pour tout schéma MySQL/MariaDB."""
+    lowered = scheme.lower()
+    if lowered.split("+", 1)[0] in MYSQL_SCHEME_PREFIXES and not lowered.endswith("+pymysql"):
+        return "mysql+pymysql"
+    return scheme
 
 
 def running_inside_docker() -> bool:
@@ -21,47 +35,67 @@ def running_inside_docker() -> bool:
 
 
 def normalize_database_url(url: str, *, in_docker: bool | None = None) -> str:
-    """Réécrit l'hôte compose-only de DATABASE_URL quand l'API tourne hors Docker.
+    """Normalise ``DATABASE_URL`` avant sa transmission à SQLAlchemy.
 
-    ``postgres`` est le nom du service docker-compose : il n'est résoluble que
-    à l'intérieur du réseau Docker. Lancer ``uvicorn`` directement sur la
-    machine hôte avec une telle URL fait échouer le démarrage avec :
-    « could not translate host name "postgres" to address: Temporary failure
-    in name resolution ». Le docker-compose publiant le port 5432 du conteneur
-    sur l'hôte, la substitution par ``localhost`` rend le démarrage local
-    fonctionnel sans modifier le ``.env`` partagé avec Docker.
+    Deux corrections sont appliquées :
+
+    1. **Hôte compose-only** — ``postgres``/``mysql`` ne sont résolubles que
+       dans le réseau Docker. Lancer ``uvicorn`` sur la machine hôte avec une
+       telle URL échoue (« could not translate host name … »). Hors Docker,
+       l'hôte est remappé vers ``localhost``, le port publié par le compose
+       restant inchangé.
+    2. **Pilote MySQL** — ``mysql://`` et ``mariadb://`` sont réécrits vers
+       ``mysql+pymysql://`` : PyMySQL est le pilote pur Python embarqué dans
+       l'image, MySQLdb n'y est pas installé.
     """
-    if in_docker is None:
-        in_docker = running_inside_docker()
-    if in_docker or not url:
+    if not url:
         return url
     try:
         parts = urllib.parse.urlsplit(url)
-        host = parts.hostname or ""
     except ValueError:
-        return url
-    if host.lower() not in COMPOSE_ONLY_HOSTS:
         return url
 
     netloc = parts.netloc
-    userinfo, sep, hostport = netloc.rpartition("@")
-    if not sep:
-        userinfo, hostport = "", netloc
-    # Remplace uniquement l'hôte, en conservant identifiants et port.
-    if hostport.lower().startswith(host.lower()):
-        hostport = "localhost" + hostport[len(host):]
-    netloc = f"{userinfo}@{hostport}" if userinfo else hostport
-    normalized = urllib.parse.urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
+    try:
+        host = (parts.hostname or "").lower()
+        port = parts.port
+    except ValueError:
+        return url
+    changed = False
+    if in_docker is None:
+        in_docker = running_inside_docker()
 
-    shown = f"{parts.scheme}://localhost" + (f":{parts.port}" if parts.port else "") + parts.path
-    logging.getLogger(__name__).warning(
-        "DATABASE_URL cible l'hôte Docker « %s » mais l'API tourne hors Docker ; "
-        "l'hôte a été remappé vers localhost (%s). Vérifiez que le conteneur "
-        "postgres est démarré : docker compose up -d postgres",
-        host,
-        shown,
+    if not in_docker and host in COMPOSE_ONLY_HOSTS:
+        userinfo, sep, hostport = netloc.rpartition("@")
+        if not sep:
+            userinfo, hostport = "", netloc
+        # Remplace uniquement l'hôte, en conservant identifiants et port.
+        if hostport.lower().startswith(host):
+            hostport = "localhost" + hostport[len(host):]
+        netloc = f"{userinfo}@{hostport}" if userinfo else hostport
+        changed = True
+
+        shown = f"{parts.scheme}://localhost" + (f":{port}" if port else "") + parts.path
+        logging.getLogger(__name__).warning(
+            "DATABASE_URL cible l'hôte Docker « %s » mais l'API tourne hors Docker ; "
+            "l'hôte a été remappé vers localhost (%s). Vérifiez que le service de "
+            "base de données est démarré : docker compose up -d postgres, ou "
+            "docker compose -f docker-compose.mysql.yml up -d mysql",
+            host,
+            shown,
+        )
+
+    scheme = parts.scheme.lower()
+    normalized_scheme = normalize_mysql_scheme(scheme)
+    if normalized_scheme != parts.scheme:
+        changed = True
+    if not changed:
+        # Ne pas resérialiser une URL inchangée : urlunsplit() casse les URL
+        # SQLite absolues (sqlite:////tmp/x.db → sqlite://tmp/x.db).
+        return url
+    return urllib.parse.urlunsplit(
+        (normalized_scheme or scheme, netloc, parts.path, parts.query, parts.fragment)
     )
-    return normalized
 
 
 def parse_bool(raw: str | None, default: bool = False) -> bool:

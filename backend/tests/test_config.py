@@ -80,6 +80,36 @@ class DatabaseUrlNormalizationTest(unittest.TestCase):
         ):
             self.assertEqual(normalize_database_url(url, in_docker=False), url)
 
+    def test_sqlite_absolute_path_is_not_mangled(self):
+        # urllib.urlunsplit() transformerait sqlite:////tmp/x.db en
+        # sqlite://tmp/x.db : une URL inchangée ne doit pas être resérialisée.
+        url = "sqlite:////var/lib/gestimmo/immo.db"
+        self.assertEqual(normalize_database_url(url, in_docker=False), url)
+
+    def test_mysql_scheme_rewritten_to_pymysql(self):
+        self.assertEqual(
+            normalize_database_url("mysql://u:p@db.example.com:3306/immo_db", in_docker=False),
+            "mysql+pymysql://u:p@db.example.com:3306/immo_db",
+        )
+        self.assertEqual(
+            normalize_database_url("mariadb://u:p@db.example.com:3306/immo_db", in_docker=False),
+            "mysql+pymysql://u:p@db.example.com:3306/immo_db",
+        )
+        self.assertEqual(
+            normalize_database_url("mysql+mysqldb://u:p@db.example.com/immo_db", in_docker=False),
+            "mysql+pymysql://u:p@db.example.com/immo_db",
+        )
+
+    def test_mysql_compose_host_remapped_to_localhost(self):
+        self.assertEqual(
+            normalize_database_url("mysql://u:p@mysql:3306/immo_db", in_docker=False),
+            "mysql+pymysql://u:p@localhost:3306/immo_db",
+        )
+        self.assertEqual(
+            normalize_database_url("mysql://u:p@mysql:3306/immo_db", in_docker=True),
+            "mysql+pymysql://u:p@mysql:3306/immo_db",
+        )
+
 
 class RateLimiterTest(unittest.TestCase):
     def test_blocks_after_max_requests(self):

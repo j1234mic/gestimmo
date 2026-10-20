@@ -1,0 +1,52 @@
+# Blueprint Render — déploiement de l'API GestImmo en Docker.
+#
+# 1. Poussez ce dépôt sur GitHub.
+# 2. Sur https://dashboard.render.com/blueprints, choisissez « New Blueprint »
+#    et sélectionnez le dépôt : Render lit ce fichier.
+# 3. Renseignez les variables marquées `sync: false` (base MySQL managée,
+#    clé SECURE_ID_KEY, origines CORS).
+#
+# Le plan `free` suffit pour une démonstration : 512 Mo de RAM, 0,1 CPU,
+# mise en veille après 15 min sans requête (réveil ~1 min) et système de
+# fichiers éphémère — les fichiers uploadés sont perdus à chaque redéploiement.
+# Pour des uploads durables, utilisez un plan payant avec disque persistant ou
+# l'option Oracle Cloud décrite dans backend/DEPLOIEMENT-GRATUIT.md.
+services:
+  - type: web
+    name: gestimmo-api
+    runtime: docker
+    plan: free
+    region: frankfurt
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      # URL MySQL managée, par exemple Aiven :
+      # mysql+pymysql://avnadmin:motdepasse@mysql-xxxx.aivencloud.com:12345/defaultdb?ssl-mode=REQUIRED
+      - key: DATABASE_URL
+        sync: false
+      - key: AUTO_CREATE_TABLES
+        value: "true"
+      - key: ENVIRONMENT
+        value: production
+      - key: DEBUG
+        value: "false"
+      - key: LOG_LEVEL
+        value: INFO
+      # Générée une fois par Render puis conservée : stable entre déploiements.
+      - key: SECRET_KEY
+        generateValue: true
+      # À générer manuellement et à conserver : sans elle, les secure_id déjà
+      # stockés deviennent illisibles au redémarrage.
+      # python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+      - key: SECURE_ID_KEY
+        sync: false
+      # Domaine(s) du frontend, séparés par des virgules (pas de `*` en prod).
+      - key: ALLOWED_ORIGINS
+        sync: false
+      - key: PUBLIC_BASE_URL
+        sync: false
+      # Aucune passerelle de paiement n'est configurée au premier déploiement.
+      - key: PAYMENT_SIMULATION_ENABLED
+        value: "false"

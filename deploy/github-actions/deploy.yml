@@ -1,0 +1,85 @@
+name: Déploiement
+
+# Deux cibles possibles, aucune limite de 30 jours :
+#   - vps    : VM Oracle Cloud Always Free / VPS, mise à jour par SSH (recommandé)
+#   - render : service web Render gratuit (permanent ; la base MySQL est sur Aiven)
+#
+# Secrets à créer dans Settings → Secrets and variables → Actions :
+#   VPS     : DEPLOY_HOST, DEPLOY_USER, DEPLOY_SSH_KEY, DEPLOY_DOMAIN (optionnel), DEPLOY_EMAIL (optionnel)
+#   Render  : RENDER_DEPLOY_HOOK (URL du Deploy Hook du service)
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Cible du déploiement"
+        type: choice
+        options: [vps, render]
+        default: vps
+      ref:
+        description: "Branche ou tag à déployer (cible vps uniquement)"
+        type: string
+        default: main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  vps:
+    name: Mise à jour par SSH (Always Free)
+    if: github.event_name == 'workflow_dispatch' && inputs.target == 'vps'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Vérifier les secrets
+        env:
+          HOST: ${{ secrets.DEPLOY_HOST }}
+          KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          if [ -z "$HOST" ] || [ -z "$KEY" ]; then
+            echo "::error::Secrets DEPLOY_HOST et DEPLOY_SSH_KEY requis (voir l'en-tête du workflow)."
+            exit 1
+          fi
+
+      - name: Déployer
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER || 'ubuntu' }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script_stop: true
+          command_timeout: 25m
+          script: |
+            set -euo pipefail
+            REF="${{ inputs.ref }}"
+            ARGS=(--ref "$REF")
+            if [ -n "${{ secrets.DEPLOY_DOMAIN }}" ]; then
+              ARGS+=(--domain "${{ secrets.DEPLOY_DOMAIN }}")
+            fi
+            if [ -n "${{ secrets.DEPLOY_EMAIL }}" ]; then
+              ARGS+=(--email "${{ secrets.DEPLOY_EMAIL }}")
+            fi
+            sudo /opt/gestimmo/deploy/install.sh "${ARGS[@]}"
+
+  render:
+    name: Déploiement Render (plan gratuit permanent)
+    if: github.event_name == 'workflow_dispatch' && inputs.target == 'render'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # Render déploie la branche configurée dans le service (pas forcément
+      # celle de ce workflow) : vérifiez « Branch » dans les réglages Render.
+      - name: Déclencher le Deploy Hook
+        env:
+          HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
+        run: |
+          if [ -z "$HOOK" ]; then
+            echo "::error::Secret RENDER_DEPLOY_HOOK manquant (Render → Settings → Deploy Hook)."
+            exit 1
+          fi
+          curl -fsS -X POST "$HOOK"
+          echo "Déploiement Render déclenché."

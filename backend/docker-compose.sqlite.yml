@@ -1,0 +1,52 @@
+# Stack minimale : API seule, base SQLite sur un volume Docker.
+#
+# Pourquoi : sur une VM Oracle Always Free où l'Ampere A1 (ARM) est en rupture
+# de capacité, il reste deux micro-VM AMD de 1 Go de RAM (VM.Standard.E2.1.Micro).
+# MySQL 8.4 + l'API ne tiennent pas dans 1 Go ; SQLite, si.
+# C'est aussi la stack la plus légère pour un Raspberry Pi ou un petit VPS.
+#
+# Utilisation (depuis backend/) :
+#   docker compose -f docker-compose.sqlite.yml up -d --build
+#
+# Limites de SQLite :
+#   - un seul processus d'écriture : gardez un seul worker uvicorn (c'est le cas) ;
+#   - pas de restauration à chaud : l'endpoint de sauvegarde copie le fichier
+#     (format .sqlite3), la restauration se fait hors ligne, API arrêtée ;
+#   - pour plusieurs instances ou un trafic concurrent, préférez MySQL
+#     (docker-compose.mysql.yml) ou une base managée.
+services:
+  api:
+    build: .
+    container_name: immo_api_sqlite
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # Base locale persistante dans le volume « sqlite_data ».
+      - DATABASE_URL=sqlite:////data/immo.db
+      - AUTO_CREATE_TABLES=${AUTO_CREATE_TABLES:-true}
+      - DEBUG=${DEBUG:-false}
+      - ENVIRONMENT=${ENVIRONMENT:-production}
+      - SECRET_KEY=${SECRET_KEY:-change-this-secret-before-production}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-*}
+      - LOG_FILE=/data/logs/app.log
+      - SMS_WEBHOOK_URL=${SMS_WEBHOOK_URL:-}
+      - SMS_WEBHOOK_TOKEN=${SMS_WEBHOOK_TOKEN:-}
+      - AI_CHAT_BASE_URL=${AI_CHAT_BASE_URL:-}
+      - AI_CHAT_MODEL=${AI_CHAT_MODEL:-}
+      - AI_CHAT_API_KEY=${AI_CHAT_API_KEY:-}
+      - AI_CHAT_TIMEOUT_SECONDS=${AI_CHAT_TIMEOUT_SECONDS:-25}
+    ports:
+      # En production derrière Caddy, mettez API_BIND=127.0.0.1 dans .env.
+      - "${API_BIND:-0.0.0.0}:8000:8000"
+    volumes:
+      - sqlite_data:/data
+      - public_uploads:/app/uploads
+      - private_uploads:/app/private_uploads
+      - backups:/app/backups
+
+volumes:
+  sqlite_data:
+  public_uploads:
+  private_uploads:
+  backups:

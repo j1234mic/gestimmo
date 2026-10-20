@@ -1,0 +1,43 @@
+#cloud-config
+# Déploiement automatique de GestImmo sur une VM Oracle Cloud « Always Free »
+# (Ubuntu 24.04 ARM) — ou tout autre Ubuntu/Debian compatible cloud-init.
+#
+# Utilisation :
+#   1. Créez l'instance (shape VM.Standard.A1.Flex, Ubuntu 24.04 aarch64).
+#   2. Dans « Show advanced options » → « Management » → « Cloud-init script »,
+#      collez ce fichier APRÈS avoir remplacé REF ci-dessous.
+#      REF = main une fois la pull request fusionnée, sinon le nom de branche.
+#   3. Ouvrez les ports 22, 80 et 443 dans la Security List du subnet.
+#
+# Sans --domain, l'API répond en HTTP sur http://<IP_PUBLIQUE>.
+# Pour activer HTTPS ensuite, relancez le script sur la VM :
+#   sudo /opt/gestimmo/deploy/install.sh --domain api.example.com --email moi@example.com
+#
+# Micro-VM AMD (1 Go de RAM, quand l'Ampere A1 est en rupture de capacité) :
+#   ajoutez --sqlite à la commande ci-dessus, ou exécutez directement
+#   sudo /opt/gestimmo/deploy/install.sh --sqlite
+
+package_update: true
+packages:
+  - git
+  - curl
+  - ca-certificates
+
+write_files:
+  - path: /root/deploy-gestimmo.sh
+    permissions: "0755"
+    content: |
+      #!/usr/bin/env bash
+      set -euo pipefail
+      REF="${GESTIMMO_REF:-main}"
+      SCRIPT_URL="https://raw.githubusercontent.com/j1234mic/gestimmo/${REF}/deploy/install.sh"
+      curl -fsSL --retry 5 --retry-delay 5 "$SCRIPT_URL" -o /root/gestimmo-install.sh
+      chmod +x /root/gestimmo-install.sh
+      /root/gestimmo-install.sh --ref "$REF" 2>&1 | tee /var/log/gestimmo-install.log
+
+runcmd:
+  - [ bash, /root/deploy-gestimmo.sh ]
+
+final_message: |
+  GestImmo : installation terminée (voir /var/log/gestimmo-install.log).
+  Testez ensuite : curl -s http://127.0.0.1/health
