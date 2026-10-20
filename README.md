@@ -2,6 +2,12 @@
 
 API FastAPI couvrant la gestion des biens, des propriétaires et des locataires.
 
+## Déploiement Railway
+
+Configuration et étapes : [guide Railway](backend/DEPLOIEMENT-RAILWAY.md).
+Utilisez `/backend` comme répertoire racine du service. Vérifiez les crédits
+et tarifs de votre compte : la gratuité permanente n’est pas garantie.
+
 ## État d'avancement des 31 modules
 
 Le détail complet, module par module et avec les preuves d'exécution, est dans
