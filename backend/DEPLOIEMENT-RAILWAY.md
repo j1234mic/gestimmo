@@ -13,10 +13,10 @@ Ne partagez aucun jeton Railway, mot de passe de base ou clé dans Git/chat.
 
 ## 1. Service API depuis GitHub
 
-1. Rendez cette branche disponible sur GitHub, puis créez un projet Railway
-   avec **Deploy from GitHub repo**, dépôt `j1234mic/gestimmo`.
-2. Choisissez la branche `arena/3eb39821-gestimmo` tant que ces changements
-   ne sont pas intégrés à votre branche principale.
+1. Rendez la branche qui contient les changements disponible sur GitHub,
+   puis créez un projet Railway avec **Deploy from GitHub repo**, dépôt
+   `j1234mic/gestimmo`.
+2. Choisissez cette branche (ou `main` après intégration des changements).
 3. Dans les paramètres du service, définissez **Root Directory** à `/backend`.
    Le contexte Docker doit être `backend`, et non la racine du dépôt.
 4. Si Railway demande explicitement le chemin du fichier de configuration,
@@ -31,9 +31,15 @@ Railway. Ne remplacez pas sa commande de démarrage.
 Ajoutez un service PostgreSQL au projet (il consomme lui aussi des ressources).
 Dans les variables du service **API**, ajoutez une référence à son
 `DATABASE_URL` interne via le sélecteur de références Railway, sous le nom
-`DATABASE_URL`. Ne recopiez pas une URL publique inutilement.
-Une base PostgreSQL/MySQL externe est aussi possible si elle est accessible
-et si ses paramètres TLS sont respectés.
+`DATABASE_URL` (par exemple `${{Postgres.DATABASE_URL}}`, en remplaçant
+`Postgres` par le nom exact du service). Ne recopiez pas une URL publique
+inutilement.
+
+N'utilisez pas `localhost` ni `postgres` comme hôte dans Railway : `localhost`
+renvoie vers le conteneur API lui-même, et `postgres` est uniquement l'alias du
+service dans le réseau Docker Compose local. Utilisez la référence Railway
+fournie par la base. Une base PostgreSQL/MySQL externe est aussi possible si
+elle est accessible et si ses paramètres TLS sont respectés.
 
 Configurez également :
 
@@ -92,6 +98,16 @@ Ouvrez `https://VOTRE-DOMAINE/docs` pour Swagger. Le dépôt contient une API,
 pas une interface web de gestion. `/health` confirme que le processus répond,
 mais ne teste pas la base : vérifiez aussi un parcours métier depuis Swagger.
 Consultez les logs si le déploiement échoue, et la consommation après démarrage.
+
+### Dépannage : `localhost:5432` refusé ou hôte `postgres` remappé
+
+Ce message signifie que l'API n'utilise pas l'adresse de la base Railway. Dans
+les variables du service API, créez ou corrigez `DATABASE_URL` avec une
+référence au service PostgreSQL du même projet, puis redéployez l'API. N'utilisez
+pas l'URL locale de `docker-compose` (`...@postgres:5432/...`) ni
+`...@localhost:5432/...`. Si le message de remappage apparaît encore après le
+redéploiement, vérifiez que Railway déploie bien le commit contenant la
+correction et que la référence `DATABASE_URL` est définie sur le service API.
 
 Si le budget doit impérativement rester à zéro, n'activez aucun service sans
 avoir confirmé les conditions de votre compte. Les autres pistes du dépôt
