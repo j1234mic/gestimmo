@@ -1,0 +1,48 @@
+# Render Blueprint — API FastAPI + PostgreSQL et stockage persistant.
+# Le disque nécessite une offre payante Render (pas de stockage persistant en free).
+databases:
+  - name: gestimmo-db
+    databaseName: gestimmo
+    user: gestimmo
+    plan: basic
+
+services:
+  - type: web
+    name: gestimmo-api
+    runtime: docker
+    plan: starter
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    healthCheckPath: /health
+    disk:
+      name: gestimmo-files
+      mountPath: /app/storage
+      sizeGB: 1
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: gestimmo-db
+          property: connectionString
+      - key: ENVIRONMENT
+        value: production
+      - key: DEBUG
+        value: "false"
+      - key: AUTO_CREATE_TABLES
+        value: "true"
+      - key: PAYMENT_SIMULATION_ENABLED
+        value: "false"
+      - key: SECRET_KEY
+        generateValue: true
+      # Fernet key: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+      - key: SECURE_ID_KEY
+        sync: false
+      - key: ALLOWED_ORIGINS
+        sync: false
+      - key: UPLOAD_DIR
+        value: /app/storage/uploads
+      - key: PRIVATE_UPLOAD_DIR
+        value: /app/storage/private_uploads
+      - key: BACKUP_DIR
+        value: /app/storage/backups
+      - key: LOG_FILE
+        value: /app/storage/logs/app.log
