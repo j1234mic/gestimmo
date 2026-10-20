@@ -529,7 +529,12 @@ def create_backup(db: Session, actor: str, trigger: str = "manual") -> BackupRec
     backup_dir.mkdir(parents=True, exist_ok=True)
     stamp = utcnow().strftime("%Y%m%dT%H%M%S%f")
     dialect = engine.url.get_backend_name()
-    suffix = ".sqlite3" if dialect == "sqlite" else ".dump"
+    if dialect == "sqlite":
+        suffix = ".sqlite3"
+    elif dialect in {"mysql", "mariadb"}:
+        suffix = ".sql"
+    else:
+        suffix = ".dump"
     filename = f"gestimmo-{trigger}-{stamp}{suffix}"
     path = backup_dir / filename
     record = BackupRecord(
@@ -559,6 +564,33 @@ def create_backup(db: Session, actor: str, trigger: str = "manual") -> BackupRec
             completed = subprocess.run(command, env=env, capture_output=True, text=True, timeout=900, check=False)
             if completed.returncode:
                 raise RuntimeError(completed.stderr.strip() or "pg_dump a échoué")
+        elif dialect in {"mysql", "mariadb"}:
+            # mysqldump écrit un script SQL restaurable avec le client mysql.
+            # Le mot de passe passe par MYSQL_PWD pour ne pas apparaître dans
+            # la liste des processus. --no-tablespaces évite d'exiger le
+            # privilège PROCESS, souvent absent sur les offres managées.
+            env = os.environ.copy()
+            if engine.url.password:
+                env["MYSQL_PWD"] = engine.url.password
+            command = [
+                "mysqldump",
+                "--single-transaction",
+                "--quick",
+                "--skip-lock-tables",
+                "--no-tablespaces",
+                "--default-character-set=utf8mb4",
+                "--host", engine.url.host or "localhost",
+                "--port", str(engine.url.port or 3306),
+                "--user", engine.url.username or "root",
+                str(engine.url.database or ""),
+            ]
+            with open(path, "wb") as output:
+                completed = subprocess.run(
+                    command, env=env, stdout=output, stderr=subprocess.PIPE, timeout=900, check=False
+                )
+            if completed.returncode:
+                message = completed.stderr.decode(errors="replace").strip()
+                raise RuntimeError(message or "mysqldump a échoué")
         else:
             raise ValueError(f"Moteur de base non pris en charge : {dialect}")
         content = path.read_bytes()
@@ -595,10 +627,20 @@ def validate_backup(record: BackupRecord) -> Path:
 
 
 def restore_backup(db: Session, record: BackupRecord) -> BackupRecord:
-    """Restaure SQLite. PostgreSQL nécessite pg_restore et un redémarrage contrôlé."""
+    """Restaure SQLite. Les bases serveur sont restaurées hors ligne.
+
+    PostgreSQL se restaure avec ``pg_restore`` et MySQL avec ``mysql < dump.sql``,
+    après arrêt de l'API : ces deux moteurs ne peuvent pas remplacer leur
+    fichier de données à chaud.
+    """
     path = validate_backup(record)
     dialect = engine.url.get_backend_name()
     if dialect != "sqlite" or record.database_kind != "sqlite":
+        if dialect in {"mysql", "mariadb"}:
+            raise ValueError(
+                "La restauration MySQL doit être exécutée hors ligne : "
+                "mysql --host=… --user=… base < sauvegarde.sql"
+            )
         raise ValueError("La restauration PostgreSQL doit être exécutée hors ligne avec pg_restore")
     destination = engine.url.database
     if not destination or destination == ":memory:":

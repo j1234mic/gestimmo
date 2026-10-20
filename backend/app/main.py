@@ -245,16 +245,30 @@ async def startup():
                 db_host = urllib.parse.urlsplit(settings.DATABASE_URL).hostname or db_host
             except ValueError:
                 pass
+            is_mysql = settings.DATABASE_URL.startswith(("mysql", "mariadb"))
+            if is_mysql:
+                service_hint = (
+                    "   1) Le conteneur mysql est-il démarré ?\n"
+                    "      -> docker compose -f docker-compose.mysql.yml up -d mysql\n"
+                    "   2) Base managée (Aiven, HeatWave…) : vérifiez l'hôte, le port\n"
+                    "      (souvent 12345 chez Aiven) et le paramètre ssl-mode dans\n"
+                    "      DATABASE_URL (backend/.env).\n"
+                    "   3) Ou lancez toute la stack MySQL : docker compose -f docker-compose.mysql.yml up --build"
+                )
+            else:
+                service_hint = (
+                    "   1) Le conteneur postgres est-il démarré ? -> docker compose up -d postgres\n"
+                    "   2) L'API tourne hors Docker : l'hôte « postgres » a été remappé vers\n"
+                    "      « localhost » ; vérifiez DATABASE_URL dans backend/.env\n"
+                    "      (postgresql://immo_user:immo_password_2024@localhost:5432/immo_db)\n"
+                    "   3) Ou lancez toute la stack dans Docker : docker compose up --build"
+                )
             app_logger.error(
                 "❌ Impossible de joindre la base de données (%s).\n"
-                "   Cause racine : %s\n"
-                "   1) Le conteneur postgres est-il démarré ? -> docker compose up -d postgres\n"
-                "   2) L'API tourne hors Docker : l'hôte « postgres » a été remappé vers\n"
-                "      « localhost » ; vérifiez DATABASE_URL dans backend/.env\n"
-                "      (postgresql://immo_user:immo_password_2024@localhost:5432/immo_db)\n"
-                "   3) Ou lancez toute la stack dans Docker : docker compose up --build",
+                "   Cause racine : %s\n%s",
                 db_host,
                 exc.orig,
+                service_hint,
             )
             raise RuntimeError(f"Connexion impossible à la base de données ({db_host}) : {exc.orig}") from exc
     app.state.backup_task = asyncio.create_task(_backup_scheduler())

@@ -1,0 +1,78 @@
+# Stack Docker alternative : API GestImmo + MySQL 8.4 LTS.
+#
+# Utilisation (depuis backend/) :
+#   docker compose -f docker-compose.mysql.yml up -d --build
+#
+# Le fichier est autonome : il ne démarre pas PostgreSQL. La base MySQL est
+# initialisée au premier démarrage par l'image officielle (variables MYSQL_*).
+# Les données, les uploads et les sauvegardes sont conservés dans des volumes
+# nommés : `docker compose down` ne les supprime pas (seul `down -v` le fait).
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: immo_mysql
+    restart: unless-stopped
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    environment:
+      MYSQL_DATABASE: immo_db
+      MYSQL_USER: immo_user
+      MYSQL_PASSWORD: immo_password_2024
+      MYSQL_ROOT_PASSWORD: immo_root_password_2024
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
+    networks:
+      - immo_network
+
+  api:
+    build: .
+    container_name: immo_api_mysql
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      # `environment` prime sur `.env` : l'API du compose parle toujours au
+      # service `mysql`. Surchargez avec DATABASE_URL_MYSQL pour viser une base
+      # managée (Aiven, HeatWave…) depuis un conteneur.
+      - DATABASE_URL=${DATABASE_URL_MYSQL:-mysql+pymysql://immo_user:immo_password_2024@mysql:3306/immo_db?charset=utf8mb4}
+      - AUTO_CREATE_TABLES=${AUTO_CREATE_TABLES:-true}
+      - DEBUG=${DEBUG:-false}
+      - ENVIRONMENT=${ENVIRONMENT:-production}
+      - SECRET_KEY=${SECRET_KEY:-change-this-secret-before-production}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-*}
+      - SMS_WEBHOOK_URL=${SMS_WEBHOOK_URL:-}
+      - SMS_WEBHOOK_TOKEN=${SMS_WEBHOOK_TOKEN:-}
+      - AI_CHAT_BASE_URL=${AI_CHAT_BASE_URL:-}
+      - AI_CHAT_MODEL=${AI_CHAT_MODEL:-}
+      - AI_CHAT_API_KEY=${AI_CHAT_API_KEY:-}
+      - AI_CHAT_TIMEOUT_SECONDS=${AI_CHAT_TIMEOUT_SECONDS:-25}
+    ports:
+      - "8000:8000"
+    volumes:
+      - public_uploads:/app/uploads
+      - private_uploads:/app/private_uploads
+      - backups:/app/backups
+    networks:
+      - immo_network
+
+volumes:
+  mysql_data:
+  public_uploads:
+  private_uploads:
+  backups:
+
+networks:
+  immo_network:
+    driver: bridge

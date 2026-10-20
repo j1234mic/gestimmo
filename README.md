@@ -23,7 +23,7 @@ consolidé. Le module 2 couvre la signature électronique du mandat avec dossier
 de preuve et la synthèse financière par bien. Le module 15 couvre le cycle de
 vie complet des contrats, sinistres et attestations.
 
-Suite de tests : 113 tests d'intégration, tous verts.
+Suite de tests : 136 tests, tous verts (dont 23 ajoutés pour MySQL et la normalisation d'URL).
 
 ```bash
 cd backend
@@ -373,6 +373,25 @@ sur la machine hôte. Pour viser une base extérieure au compose, définissez
 
 Les tables absentes sont créées au démarrage (`AUTO_CREATE_TABLES=true`). Pour une base déjà exploitée en production, prévoir une migration SQL/Alembic avant de désactiver cette option.
 
+## Hébergement gratuit et MySQL
+
+Le backend fonctionne sur PostgreSQL (par défaut) **et sur MySQL 8.x**. Le
+passage à MySQL est pris en charge par le code : pilote PyMySQL, réécriture des
+URL `mysql://`, options TLS `ssl-mode`/`ssl-ca`, création d'index portable et
+sauvegarde `mysqldump`.
+
+```bash
+cd backend
+# Stack locale API + MySQL 8.4 (volumes persistants pour la base et les uploads)
+docker compose -f docker-compose.mysql.yml up -d --build
+```
+
+Le comparatif des hébergements gratuits (Oracle Cloud Always Free, Render,
+Cloud Run) et des bases MySQL gratuites (HeatWave, Aiven, TiDB) est détaillé
+dans [`backend/DEPLOIEMENT-GRATUIT.md`](backend/DEPLOIEMENT-GRATUIT.md).
+Un blueprint Render prêt à l'emploi se trouve dans
+[`render.yaml`](render.yaml).
+
 ## Démarrage local
 
 ```bash
@@ -694,8 +713,8 @@ cinq prestataires, abonnement premium, encaissement via checkout en mode
 simulation, confirmation idempotente (jeton et webhook), annulation et agrégat de
 revenu.
 
-La suite complète comporte **113 tests d'intégration**. Les modules 1 (biens),
-2 (propriétaires) et 15 (assurances/sinistres) sont désormais couverts par
+La suite complète comporte **136 tests**, dont 23 ajoutés pour MySQL et la normalisation d'URL. Les modules 1 (biens), 2 (propriétaires) et 15
+(assurances/sinistres) sont désormais couverts par
 `tests/test_module1_2_15_completions.py`. La génération d'un compte de connexion
 propriétaire est couverte par `tests/test_owner_credentials.py`. Le seul module encore non couvert
 est le module 14 (mobile, socle API uniquement). Voir

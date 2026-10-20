@@ -16,7 +16,8 @@ Usage (depuis ``backend/``) ::
 
     python scripts/init_env.py                       # complète .env, génère les clés manquantes
     python scripts/init_env.py --db-host localhost   # + base jointe sur localhost (API hors Docker)
-    python scripts/init_env.py --db-host postgres    # + base jointe via le réseau Docker
+    python scripts/init_env.py --db-host postgres    # + base PostgreSQL via le réseau Docker
+    python scripts/init_env.py --db-host mysql       # + base MySQL via docker-compose.mysql.yml
     python scripts/init_env.py --check               # diagnostic seul, n'écrit rien
 
 Le script est idempotent : relancé, il ne modifie que ce qui manque et ne
@@ -40,7 +41,7 @@ EXAMPLE_FILE = BACKEND_DIR / ".env.example"
 
 # Mêmes hôtes compose-only que app/config.py (copie volontaire : ce script
 # doit rester exécutable sans dépendance applicative).
-COMPOSE_ONLY_HOSTS = {"postgres", "db"}
+COMPOSE_ONLY_HOSTS = {"postgres", "db", "mysql", "mariadb"}
 
 SECRET_KEY_PLACEHOLDERS = {
     "changez-cette-cle-secrete-minimum-32-caracteres",
@@ -271,7 +272,8 @@ def main(argv: list[str] | None = None) -> int:
             print(
                 f"NOTE : DATABASE_URL pointe vers « {db_host_of(url)} » (hôte docker-compose) alors que "
                 "l'API semble tourner hors Docker. Relancez avec --db-host localhost pour figer ce choix "
-                "dans .env, ou démarrez la base : docker compose up -d postgres"
+                "dans .env, ou démarrez la base : docker compose up -d postgres "
+                "(MySQL : docker compose -f docker-compose.mysql.yml up -d mysql)"
             )
 
     lines = load_env_lines()

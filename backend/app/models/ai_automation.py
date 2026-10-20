@@ -13,6 +13,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -101,11 +102,23 @@ class ChatKnowledge(Base):
 
     __tablename__ = "ai_chat_knowledge"
 
+    # MySQL limite une clé d'index à 3 072 octets avec utf8mb4, soit 768
+    # caractères : un index plein sur VARCHAR(1000) est refusé. Le préfixe de
+    # 191 caractères (764 octets) est accepté et suffit à la recherche ; les
+    # autres moteurs conservent un index complet.
+    __table_args__ = (
+        Index(
+            "ix_ai_chat_knowledge_normalized_question",
+            "normalized_question",
+            mysql_length=191,
+        ),
+    )
+
     id = Column(Integer, primary_key=True)
     actor_type = Column(String(20), nullable=False, index=True)
     actor_id = Column(Integer, nullable=False, index=True)
     question = Column(Text, nullable=False)
-    normalized_question = Column(String(1000), nullable=False, index=True)
+    normalized_question = Column(String(1000), nullable=False)
     answer = Column(Text, nullable=False)
     usage_count = Column(Integer, default=1, nullable=False)
     last_used_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
