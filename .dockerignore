@@ -1,0 +1,57 @@
+# Contexte de construction de Dockerfile.vercel.
+#
+# Deux objectifs : ne jamais cuire de secret dans l'image poussée sur le Vercel
+# Container Registry, et garder le contexte léger (le dépôt entier est envoyé au
+# démon de build à chaque déploiement).
+
+# Secrets — backend/.env est suivi par Git et contient un mot de passe de base
+# ainsi qu'une clé Fernet SECURE_ID_KEY réelle. Il ne doit jamais entrer dans
+# l'image : les variables d'environnement du projet Vercel sont la seule source.
+backend/.env
+backend/.env.*
+!backend/.env.example
+
+# Dépôt Git et métadonnées
+.git
+.gitignore
+.github
+
+# Artefacts Python
+**/__pycache__
+**/*.py[cod]
+**/*.pyc
+.venv
+venv
+
+# Données et fichiers générés en local
+backend/test.db
+**/*.db
+**/*.sqlite
+**/*.sqlite3
+backend/uploads
+backend/private_uploads
+backend/backups
+backend/logs
+**/*.log
+
+# Tests et outillage de développement : inutiles à l'exécution.
+backend/tests
+backend/test.py
+backend/create_owners.py
+backend/.continue
+.continue
+
+# Configurations d'autres cibles de déploiement
+backend/docker
+backend/docker-compose.yml
+backend/docker-compose.mysql.yml
+backend/docker-compose.sqlite.yml
+backend/Dockerfile
+backend/railway.json
+deploy
+render.yaml
+vercel.json
+
+# Documentation
+*.md
+backend/*.md

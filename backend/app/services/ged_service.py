@@ -23,6 +23,7 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.config import settings
+from app.services import file_storage
 from app.models.ged import (
     GedAuditLog,
     GedDocument,
@@ -476,6 +477,19 @@ def store_file(content: bytes, filename: str, document_id: int) -> Path:
     return path
 
 
+def persist_reference(path: Path, content_type: Optional[str] = None) -> str:
+    """Référence à écrire en base : URL Vercel Blob si le miroir a réussi.
+
+    Le fichier reste d'abord écrit sur disque : l'OCR, les empreintes SHA-256 et
+    les miniatures qui suivent lisent ce chemin. La réplication vers le stockage
+    objet ne change que la valeur persistée, donc ce que les requêtes suivantes
+    (potentiellement sur une autre instance) pourront relire.
+    """
+    return file_storage.reference_for(
+        path, file_storage.mirror(path, content_type=content_type)
+    )
+
+
 def _retain_until(years: int) -> date:
     today = date.today()
     try:
@@ -507,9 +521,11 @@ def create_document(
     allowed = cfg.allowed_extensions or list(DEFAULT_EXTENSIONS)
     if ext not in allowed:
         raise ValueError(f"Extension non autorisée : {ext}")
-    max_bytes = (cfg.max_upload_mb or 20) * 1024 * 1024
+    max_bytes = settings.upload_ceiling((cfg.max_upload_mb or 20) * 1024 * 1024)
     if len(content) > max_bytes:
-        raise ValueError(f"Fichier trop volumineux (max {cfg.max_upload_mb} Mo)")
+        raise ValueError(
+            f"Fichier trop volumineux (max {file_storage.format_size(max_bytes)})"
+        )
     content, new_ext = _compress_if_needed(content, filename, bool(cfg.compress_images))
     if new_ext != ext and filename.lower().endswith(ext):
         filename = str(Path(filename).with_suffix(f".{new_ext}"))
@@ -540,12 +556,13 @@ def create_document(
     db.add(document)
     db.flush()
     path = store_file(content, filename, document.id)
-    document.storage_path = str(path)
+    reference = persist_reference(path, mime_type)
+    document.storage_path = reference
     db.add(
         GedDocumentVersion(
             document_id=document.id,
             version_number=1,
-            storage_path=str(path),
+            storage_path=reference,
             file_size=len(content),
             file_hash=document.file_hash,
             mime_type=document.mime_type,
@@ -580,13 +597,16 @@ def add_version(
     allowed = cfg.allowed_extensions or list(DEFAULT_EXTENSIONS)
     if ext not in allowed:
         raise ValueError(f"Extension non autorisée : {ext}")
-    max_bytes = (cfg.max_upload_mb or 20) * 1024 * 1024
+    max_bytes = settings.upload_ceiling((cfg.max_upload_mb or 20) * 1024 * 1024)
     if len(content) > max_bytes:
-        raise ValueError(f"Fichier trop volumineux (max {cfg.max_upload_mb} Mo)")
+        raise ValueError(
+            f"Fichier trop volumineux (max {file_storage.format_size(max_bytes)})"
+        )
     content, _ = _compress_if_needed(content, filename, bool(cfg.compress_images))
     path = store_file(content, filename, document.id)
+    reference = persist_reference(path, mime_type)
     document.current_version = (document.current_version or 1) + 1
-    document.storage_path = str(path)
+    document.storage_path = reference
     document.original_filename = filename
     document.mime_type = mime_type
     document.file_size = len(content)
@@ -595,7 +615,7 @@ def add_version(
         GedDocumentVersion(
             document_id=document.id,
             version_number=document.current_version,
-            storage_path=str(path),
+            storage_path=reference,
             file_size=len(content),
             file_hash=document.file_hash,
             mime_type=mime_type,
@@ -1099,7 +1119,7 @@ def _complete_envelope(db: Session, envelope: GedSignatureEnvelope) -> None:
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / f"{envelope.reference}.pdf"
     path.write_bytes(evidence)
-    envelope.evidence_path = str(path)
+    envelope.evidence_path = persist_reference(path, "application/pdf")
     envelope.evidence_hash = hashlib.sha256(evidence).hexdigest()
 
 

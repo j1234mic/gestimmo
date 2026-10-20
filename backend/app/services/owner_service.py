@@ -17,6 +17,7 @@ from reportlab.lib.units import cm
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 from app.config import settings
+from app.services import file_storage
 from app.models.owner import Owner, PropertyOwner, Mandate
 from app.schemas.owner import OwnerCreate, OwnerUpdate, MandateCreate, MandateSignatureRequest
 from app.hexagon.infrastructure.security.id_cipher import encrypt_id
@@ -215,8 +216,12 @@ def _save_signature_image(encoded: str, directory: Path) -> str:
         content = base64.b64decode(value, validate=True)
     except (binascii.Error, ValueError):
         raise ValueError("Signature encodée invalide")
-    if not content or len(content) > 2 * 1024 * 1024:
-        raise ValueError("La signature doit être une image PNG/JPEG de moins de 2 Mo")
+    max_size = settings.upload_ceiling(2 * 1024 * 1024)
+    if not content or len(content) > max_size:
+        raise ValueError(
+            "La signature doit être une image PNG/JPEG de moins de "
+            f"{file_storage.format_size(max_size)}"
+        )
     expected = (b"\x89PNG\r\n\x1a\n", b"\xff\xd8\xff")
     if not any(content.startswith(sig) for sig in expected):
         raise ValueError("La signature doit être une image PNG ou JPEG")
@@ -224,7 +229,7 @@ def _save_signature_image(encoded: str, directory: Path) -> str:
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / f"{uuid.uuid4().hex}.{ext}"
     path.write_bytes(content)
-    return str(path)
+    return file_storage.reference_for(path, file_storage.mirror(path, content_type=f"image/{ext}"))
 
 
 def sign_mandate(db: Session, owner_id: int, mandate_id: int, data: MandateSignatureRequest,
@@ -278,7 +283,9 @@ def sign_mandate(db: Session, owner_id: int, mandate_id: int, data: MandateSigna
     mandate.status = "signed"
     mandate.signature_hash = signature_hash
     mandate.signature_document_hash = document_hash
-    mandate.signature_evidence_path = str(evidence_path)
+    mandate.signature_evidence_path = file_storage.reference_for(
+        evidence_path, file_storage.mirror(evidence_path, content_type="application/pdf")
+    )
     mandate.signature_image_path = image_path
     mandate.signature_consent_at = datetime.now(timezone.utc)
     mandate.signature_ip = ip

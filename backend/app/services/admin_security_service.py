@@ -26,6 +26,7 @@ from sqlalchemy import inspect
 from sqlalchemy.orm import Session
 
 from app.config import settings
+from app.services import file_storage
 from app.database import SessionLocal, engine
 from app.models.admin_security import (
     AdminRole,
@@ -598,6 +599,11 @@ def create_backup(db: Session, actor: str, trigger: str = "manual") -> BackupRec
         record.checksum_sha256 = hashlib.sha256(content).hexdigest()
         record.status = "completed"
         record.completed_at = utcnow()
+        # Sur Vercel, BACKUP_DIR est sous /tmp et disparaît à la mise à l'échelle
+        # à zéro : la sauvegarde n'a de valeur que répliquée dans le store objet.
+        record.storage_path = file_storage.reference_for(
+            path, file_storage.mirror(path, content_type="application/octet-stream")
+        )
     except Exception as exc:
         record.status = "failed"
         record.error_message = str(exc)[:2000]
@@ -609,9 +615,29 @@ def create_backup(db: Session, actor: str, trigger: str = "manual") -> BackupRec
 
 
 def validate_backup(record: BackupRecord) -> Path:
-    path = Path(record.storage_path)
-    if record.status != "completed" or not path.is_file():
+    """Contrôle l'intégrité d'une sauvegarde et renvoie un chemin local lisible.
+
+    La sauvegarde peut résider sur le disque de l'instance ou dans Vercel Blob.
+    Dans le second cas, l'objet est rapatrié dans BACKUP_DIR avant contrôle :
+    ``PRAGMA integrity_check``, ``pg_restore`` et ``mysql < dump.sql`` attendent
+    un vrai fichier, pas une URL.
+    """
+    reference = record.storage_path
+    if record.status != "completed" or not reference:
         raise ValueError("Sauvegarde indisponible")
+
+    if file_storage.is_remote(reference):
+        path = Path(settings.backup_dir_path) / (record.filename or Path(reference).name)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            path.write_bytes(file_storage.read_bytes(reference))
+        except (OSError, RuntimeError) as exc:
+            raise ValueError(f"Sauvegarde indisponible : {exc}") from exc
+    else:
+        path = Path(reference)
+        if not path.is_file():
+            raise ValueError("Sauvegarde indisponible")
+
     digest = hashlib.sha256(path.read_bytes()).hexdigest()
     if not hmac.compare_digest(digest, record.checksum_sha256 or ""):
         raise ValueError("L'intégrité de la sauvegarde est invalide")
@@ -674,9 +700,7 @@ def apply_backup_retention(db: Session) -> dict:
     expired = db.query(BackupRecord).filter(BackupRecord.created_at < cutoff).all()
     deleted = 0
     for record in expired:
-        path = Path(record.storage_path)
-        if path.is_file():
-            path.unlink()
+        file_storage.delete(record.storage_path)
         db.delete(record)
         deleted += 1
     db.commit()

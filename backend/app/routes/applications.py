@@ -1,7 +1,6 @@
 """Candidature locative en ligne, pièces justificatives, OCR et workflow."""
 
 import hashlib
-import os
 import re
 import uuid
 from pathlib import Path
@@ -10,12 +9,12 @@ from typing import Optional
 import aiofiles
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, UploadFile, status
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import FileResponse
 from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
 
 from app.auth import require_read, require_write
 from app.config import settings
+from app.services import file_storage
 from app.database import get_db
 from app.models.tenant import (
     ApplicationStatus,
@@ -193,8 +192,12 @@ async def _save_document(
     content = await file.read()
     if not content:
         raise HTTPException(status_code=400, detail="Le fichier est vide")
-    if len(content) > MAX_DOCUMENT_SIZE:
-        raise HTTPException(status_code=413, detail="Fichier trop volumineux (15 Mo maximum)")
+    max_size = settings.upload_ceiling(MAX_DOCUMENT_SIZE)
+    if len(content) > max_size:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Fichier trop volumineux ({file_storage.format_size(max_size)} maximum)",
+        )
     _validate_file_content(content, extension)
 
     directory = Path(settings.private_upload_dir_path) / "applications" / str(application.id)
@@ -203,6 +206,11 @@ async def _save_document(
     file_path = directory / stored_name
     async with aiofiles.open(file_path, "wb") as output:
         await output.write(content)
+    # L'OCR ci-dessous lit le fichier local ; la référence persistée pointe vers
+    # le stockage objet quand il est actif (Vercel : /tmp est éphémère).
+    document_reference = file_storage.reference_for(
+        file_path, file_storage.mirror(file_path, content_type=file.content_type)
+    )
 
     analysis = await run_in_threadpool(
         analyse_document,
@@ -217,7 +225,7 @@ async def _save_document(
         document_type=document_type,
         pay_slip_period=pay_slip_period,
         original_filename=Path(file.filename or "document").name[:255],
-        storage_path=str(file_path),
+        storage_path=document_reference,
         url=f"/api/applications/{application.id}/documents/pending/download",
         mime_type=file.content_type,
         file_size=len(content),
@@ -324,9 +332,16 @@ def download_public_document(
 ):
     application = _get_public_application(db, reference, x_application_token)
     document = next((item for item in application.documents if item.id == document_id), None)
-    if not document or not os.path.isfile(document.storage_path):
+    if not document:
         raise HTTPException(status_code=404, detail="Document non trouvé")
-    return FileResponse(document.storage_path, media_type=document.mime_type, filename=document.original_filename)
+    try:
+        return file_storage.response(
+            document.storage_path,
+            media_type=document.mime_type,
+            filename=document.original_filename,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Document non trouvé") from exc
 
 
 # ---------------------------------------------------------------------------
@@ -474,9 +489,16 @@ def download_manager_document(
 ):
     application = _get_application(db, application_id)
     document = next((item for item in application.documents if item.id == document_id), None)
-    if not document or not os.path.isfile(document.storage_path):
+    if not document:
         raise HTTPException(status_code=404, detail="Document non trouvé")
-    return FileResponse(document.storage_path, media_type=document.mime_type, filename=document.original_filename)
+    try:
+        return file_storage.response(
+            document.storage_path,
+            media_type=document.mime_type,
+            filename=document.original_filename,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Document non trouvé") from exc
 
 
 @router.delete("/{application_id}/documents/{document_id}")
@@ -490,8 +512,7 @@ def delete_document(
     document = next((item for item in application.documents if item.id == document_id), None)
     if not document:
         raise HTTPException(status_code=404, detail="Document non trouvé")
-    if os.path.isfile(document.storage_path):
-        os.remove(document.storage_path)
+    file_storage.delete(document.storage_path)
     db.delete(document)
     db.flush()
     calculate_application_score(db, application, commit=False)

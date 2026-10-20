@@ -32,6 +32,7 @@ from app.schemas.property import (
     SavedSearchUpdate, SavedSearchResponse, VirtualTourUpdate, PhotoUpdate
 )
 from app.config import settings
+from app.services import file_storage
 from app.utils.logger import security_logger
 
 router = APIRouter(prefix="/api/properties", tags=["Properties"])
@@ -387,10 +388,11 @@ async def upload_property_photos(
 
         # Lire et compresser l'image (les vidéos sont stockées en l'état)
         content = await file.read()
-        if len(content) > settings.MAX_UPLOAD_SIZE:
+        max_size = settings.effective_upload_limit
+        if len(content) > max_size:
             raise HTTPException(
                 status_code=400,
-                detail=f"Fichier trop volumineux (max {settings.MAX_UPLOAD_SIZE} octets)",
+                detail=f"Fichier trop volumineux (max {max_size} octets)",
             )
 
         if media_type == "image":
@@ -426,12 +428,23 @@ async def upload_property_photos(
             async with aiofiles.open(file_path, 'wb') as f:
                 await f.write(content)
 
+        # Réplication objet : sur Vercel le disque local (/tmp) est éphémère,
+        # l'URL du store devient la référence servie au client et au CDN.
+        media_url = file_storage.reference_for(
+            f"/uploads/{property_id}/{filename}",
+            file_storage.mirror(
+                file_path,
+                f"public/{property_id}/{filename}",
+                content_type=file.content_type,
+            ),
+        )
+
         # Créer l'entrée en base
         current_is_360 = bool(is_360 and idx == 0)
         current_virtual_tour = virtual_tour_url if (virtual_tour_url and idx == 0) else None
         photo = PropertyPhoto(
             property_id=property_id,
-            url=f"/uploads/{property_id}/{filename}",
+            url=media_url,
             filename=filename,
             media_type=media_type,
             is_main=is_main and idx == 0,  # Première photo = principale si is_main=True
@@ -586,10 +599,12 @@ def delete_photo(
     if not photo:
         raise HTTPException(status_code=404, detail="Photo non trouvée")
     
-    # Supprimer le fichier physique
+    # Supprimer le fichier physique et, le cas échéant, son miroir objet.
     file_path = os.path.join(settings.upload_dir_path, str(property_id), photo.filename)
     if os.path.exists(file_path):
         os.remove(file_path)
+    if file_storage.is_remote(photo.url):
+        file_storage.delete(photo.url)
     
     db.delete(photo)
     db.commit()

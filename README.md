@@ -392,7 +392,7 @@ cd backend
 docker compose -f docker-compose.mysql.yml up -d --build
 ```
 
-Trois points d'entrée :
+Quatre points d'entrée :
 
 - **déploiement automatisé sur un serveur Always Free** (aucune limite de
   30 jours) : [`deploy/install.sh`](deploy/install.sh) + [`deploy/README.md`](deploy/README.md).
@@ -401,11 +401,18 @@ Trois points d'entrée :
   `sudo ./deploy/install.sh --domain api.example.com --email moi@example.com` ;
 - **déploiement pas à pas sur Render + Aiven MySQL** (gratuit, sans carte) :
   [`backend/DEPLOIEMENT-RENDER-AIVEN.md`](backend/DEPLOIEMENT-RENDER-AIVEN.md) ;
+- **déploiement serverless sur Vercel** (conteneur `Dockerfile.vercel`, fichiers
+  durables sur Vercel Blob, sauvegarde quotidienne par Cron Job) :
+  [`backend/DEPLOIEMENT-VERCEL.md`](backend/DEPLOIEMENT-VERCEL.md). À réserver à
+  une démonstration ou à un trafic intermittent : l'instance s'arrête après
+  5 min d'inactivité et les uploads de plus de 4,5 Mo sont refusés par la
+  plateforme ;
 - comparatif des hébergements gratuits (Oracle Cloud Always Free, Render,
   Cloud Run) et des bases MySQL gratuites (HeatWave, Aiven, TiDB) :
   [`backend/DEPLOIEMENT-GRATUIT.md`](backend/DEPLOIEMENT-GRATUIT.md).
 Un blueprint Render prêt à l'emploi se trouve dans
-[`render.yaml`](render.yaml).
+[`render.yaml`](render.yaml), et la configuration Vercel dans
+[`vercel.json`](vercel.json).
 
 ## Démarrage local
 

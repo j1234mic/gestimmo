@@ -43,6 +43,28 @@ def is_railway_environment() -> bool:
     return any(os.getenv(marker) for marker in RAILWAY_RUNTIME_MARKERS)
 
 
+# Vercel injecte ces variables dans chaque Function/conteneur. Elles signalent
+# un environnement serverless : système de fichiers en lecture seule hors /tmp,
+# mise à l'échelle à zéro après ~5 min d'inactivité et aucune tâche de fond
+# durable.
+VERCEL_RUNTIME_MARKERS = (
+    "VERCEL",
+    "VERCEL_ENV",
+    "VERCEL_DEPLOYMENT_ID",
+    "VERCEL_URL",
+)
+
+
+def is_vercel_environment() -> bool:
+    """Vrai quand l'API tourne sur Vercel (Function Python ou conteneur)."""
+    return any(os.getenv(marker) for marker in VERCEL_RUNTIME_MARKERS)
+
+
+def is_serverless_environment() -> bool:
+    """Vrai sur les plateformes sans disque persistant ni processus long."""
+    return is_vercel_environment()
+
+
 def running_inside_docker() -> bool:
     """Vrai dans Docker/Kubernetes ou sur Railway, même sans ``/.dockerenv``.
 
@@ -215,6 +237,55 @@ class Settings:
     PAYPAL_CLIENT_ID = os.getenv("PAYPAL_CLIENT_ID", "")
     PAYPAL_CLIENT_SECRET = os.getenv("PAYPAL_CLIENT_SECRET", "")
     PAYPAL_MODE = os.getenv("PAYPAL_MODE", "sandbox")  # sandbox | live
+
+    # ------------------------------------------------------------------
+    # Stockage des fichiers (module transverse : médias, GED, preuves,
+    # sauvegardes). Deux moteurs :
+    #   local — disque de l'instance (comportement historique, Render/VPS) ;
+    #   blob  — Vercel Blob, objet durable + URL publique/privée, indispensable
+    #           sur Vercel où le système de fichiers est éphémère.
+    # ------------------------------------------------------------------
+    STORAGE_BACKEND = os.getenv("STORAGE_BACKEND", "local").strip().lower()
+    BLOB_READ_WRITE_TOKEN = os.getenv(
+        "BLOB_READ_WRITE_TOKEN", os.getenv("VERCEL_BLOB_READ_WRITE_TOKEN", "")
+    )
+    BLOB_STORE_ID = os.getenv("BLOB_STORE_ID", "")
+    # `public` : URL servies par le CDN Vercel (médias de galerie).
+    # `private` : lecture authentifiée, relayée par l'API (documents locataires).
+    BLOB_ACCESS = os.getenv("BLOB_ACCESS", "public").strip().lower()
+    BLOB_API_URL = os.getenv("BLOB_API_URL", "https://vercel.com/api/blob").rstrip("/")
+    BLOB_API_VERSION = os.getenv("BLOB_API_VERSION", "13")
+    BLOB_CACHE_CONTROL_MAX_AGE = parse_int(os.getenv("BLOB_CACHE_CONTROL_MAX_AGE"), 31_536_000)
+    BLOB_ADD_RANDOM_SUFFIX = parse_bool(os.getenv("BLOB_ADD_RANDOM_SUFFIX"), True)
+    BLOB_TIMEOUT_SECONDS = parse_float(os.getenv("BLOB_TIMEOUT_SECONDS"), 60)
+    # Au-delà, un objet passe par l'upload multipart de Vercel Blob.
+    BLOB_MULTIPART_THRESHOLD = parse_int(os.getenv("BLOB_MULTIPART_THRESHOLD"), 100 * 1024 * 1024)
+    # En cas d'échec du miroir Blob, on garde la copie locale et on journalise :
+    # une pièce jointe ne doit jamais faire échouer tout un appel métier.
+    BLOB_FAIL_OPEN = parse_bool(os.getenv("BLOB_FAIL_OPEN"), True)
+
+    # ------------------------------------------------------------------
+    # Exécution serverless (Vercel)
+    # ------------------------------------------------------------------
+    # Vercel signe ses appels de Cron Jobs avec `Authorization: Bearer $CRON_SECRET`.
+    CRON_SECRET = os.getenv("CRON_SECRET", "")
+    # Derrière un proxy (Vercel, Caddy, Render), l'IP cliente réelle est dans
+    # X-Forwarded-For. Auto-détecté sur les plateformes managées.
+    TRUST_PROXY_HEADERS = parse_bool(
+        os.getenv("TRUST_PROXY_HEADERS"),
+        is_vercel_environment() or is_railway_environment()
+        or bool(os.getenv("RENDER_SERVICE_ID")) or bool(os.getenv("FLY_APP_NAME")),
+    )
+    # Le planificateur interne de sauvegarde suppose un processus permanent.
+    # Sur Vercel l'instance est gelée entre les requêtes : on le désactive et on
+    # laisse un Cron Job appeler /api/cron/daily-backup.
+    BACKUP_SCHEDULER_ENABLED = parse_bool(
+        os.getenv("BACKUP_SCHEDULER_ENABLED"), not is_vercel_environment()
+    )
+    # Limite de corps de requête imposée par Vercel Functions (4,5 Mo). Au-delà,
+    # la plateforme répond 413 avant même d'atteindre FastAPI ; l'API renvoie
+    # donc un message actionnable plutôt qu'une erreur opaque.
+    VERCEL_BODY_LIMIT = parse_int(os.getenv("VERCEL_BODY_LIMIT"), 4_500_000)
     WISE_API_TOKEN = os.getenv("WISE_API_TOKEN", "")
     MVOLA_API_KEY = os.getenv("MVOLA_API_KEY", "")
     ORANGE_MONEY_CLIENT_ID = os.getenv("ORANGE_MONEY_CLIENT_ID", "")
@@ -244,6 +315,43 @@ class Settings:
     @property
     def cors_allow_credentials(self) -> bool:
         return self.ALLOWED_ORIGINS != ["*"]
+
+    @property
+    def blob_enabled(self) -> bool:
+        """Vrai quand le stockage objet Vercel Blob est actif et crédenté.
+
+        Sans jeton, on retombe sur le disque local plutôt que de faire échouer
+        chaque écriture : un déploiement Vercel mal configuré reste démarable et
+        le journal explique la dégradation.
+        """
+        return self.STORAGE_BACKEND == "blob" and bool(self.BLOB_READ_WRITE_TOKEN)
+
+    @property
+    def effective_upload_limit(self) -> int:
+        """Plus petit plafond entre MAX_UPLOAD_SIZE et la limite Vercel.
+
+        Vercel Functions refusent tout corps de requête supérieur à 4,5 Mo avant
+        même d'atteindre FastAPI. Annoncer la limite réelle évite de promettre un
+        upload de 5 Mo qui échouera côté plateforme.
+        """
+        if is_vercel_environment():
+            return min(self.MAX_UPLOAD_SIZE, self.VERCEL_BODY_LIMIT)
+        return self.MAX_UPLOAD_SIZE
+
+    def upload_ceiling(self, requested: int) -> int:
+        """Ramène un plafond d'upload métier à la limite imposée par la plateforme.
+
+        Chaque garde conserve son plafond métier — 15 Mo pour une pièce de
+        candidature, 50 Mo pour une vidéo d'intervention — mais sur Vercel ce
+        plafond est inatteignable : la plateforme répond 413 avant FastAPI.
+        L'annoncer tel quel ferait promettre un dépôt accepté qui échoue en
+        réalité côté plateforme, avec un corps d'erreur que l'application n'a pas
+        écrit. Hors Vercel la valeur est rendue inchangée, ce qui laisse le
+        comportement des autres hébergements strictement identique.
+        """
+        if is_vercel_environment():
+            return min(requested, self.VERCEL_BODY_LIMIT)
+        return requested
 
 
 def configure_logging(settings_obj: "Settings | None" = None) -> None:

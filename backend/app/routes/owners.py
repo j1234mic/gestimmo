@@ -13,6 +13,7 @@ import aiofiles
 from app.database import get_db
 from app.auth import require_read, require_write, get_optional_user
 from app.config import settings
+from app.services import file_storage
 from app.models.admin_security import AdminRole, AdminUser, UserRoleAssignment
 from app.models.owner import Owner, PropertyOwner, Mandate
 from app.services import admin_security_service as security_service
@@ -27,8 +28,6 @@ from app.schemas.owner import (
     MandateCreate, MandateResponse, MandateSignatureRequest, PropertyOwnerLink,
     OwnerCredentialsRequest,
 )
-from fastapi.responses import FileResponse
-from pathlib import Path
 
 router = APIRouter(prefix="/api/owners", tags=["Owners"])
 
@@ -324,7 +323,16 @@ async def upload_owner_document(
     async with aiofiles.open(file_path, 'wb') as f:
         await f.write(content)
     
-    url = f"/uploads/owners/{owner_id}/{filename}"
+    # Pièce d'identité, avis d'imposition ou RIB : stockage objet durable quand
+    # il est actif, sinon dossier public servi statiquement.
+    url = file_storage.reference_for(
+        f"/uploads/owners/{owner_id}/{filename}",
+        file_storage.mirror(
+            file_path,
+            f"public/owners/{owner_id}/{filename}",
+            content_type=file.content_type,
+        ),
+    )
     if doc_type == "id":
         owner.id_document_url = url
     elif doc_type == "tax_notice":
@@ -507,10 +515,14 @@ def download_mandate_evidence(
         raise HTTPException(status_code=404, detail="Mandat non trouvé")
     if not mandate.signature_evidence_path:
         raise HTTPException(status_code=404, detail="Aucun dossier de preuve disponible")
-    path = Path(mandate.signature_evidence_path)
-    if not path.is_file():
-        raise HTTPException(status_code=404, detail="Fichier de preuve introuvable")
-    return FileResponse(path, media_type="application/pdf", filename=f"preuve-{mandate.reference}.pdf")
+    try:
+        return file_storage.response(
+            mandate.signature_evidence_path,
+            media_type="application/pdf",
+            filename=f"preuve-{mandate.reference}.pdf",
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Fichier de preuve introuvable") from exc
 
 
 @router.delete("/{owner_id}/mandates/{mandate_id}")

@@ -24,6 +24,7 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.config import settings
+from app.services import file_storage
 from app.models.integration import (
     APICredential,
     DataTransferJob,
@@ -583,13 +584,19 @@ def analyse_import(db: Session, filename: str, content: bytes, entity_type: str,
     suffix = Path(filename).suffix.lower().lstrip(".")
     if suffix not in {"csv", "xlsx"}:
         raise ValueError("Seuls les fichiers CSV et XLSX sont acceptés")
-    if len(content) > 20 * 1024 * 1024:
-        raise ValueError("Fichier trop volumineux (20 Mo maximum)")
+    max_bytes = settings.upload_ceiling(20 * 1024 * 1024)
+    if len(content) > max_bytes:
+        raise ValueError(
+            f"Fichier trop volumineux ({file_storage.format_size(max_bytes)} maximum)"
+        )
     folder = settings.private_upload_dir_path / "integrations"
     folder.mkdir(parents=True, exist_ok=True)
     ref = f"IMP-{uuid.uuid4().hex[:12].upper()}"
     path = folder / f"{ref}.{suffix}"
     path.write_bytes(content)
+    # Le fichier source est relu immédiatement par _read_tabular : la copie
+    # locale reste nécessaire, le miroir objet rend la pièce durable.
+    source_reference = file_storage.reference_for(path, file_storage.mirror(path))
     columns, rows = _read_tabular(path, suffix)
     if not columns:
         path.unlink(missing_ok=True)
@@ -598,7 +605,7 @@ def analyse_import(db: Session, filename: str, content: bytes, entity_type: str,
     row = DataTransferJob(
         reference=ref, operation="migration" if source_system else "import",
         entity_type=entity_type, source_format=suffix, source_system=source_system,
-        filename=filename, storage_path=str(path), mapping=mapping,
+        filename=filename, storage_path=source_reference, mapping=mapping,
         status="analysed", columns=columns, preview=rows[:10], total_rows=len(rows),
         created_by=actor,
     )
@@ -805,10 +812,13 @@ def export_data(db: Session, data, actor: str) -> tuple[DataTransferJob, bytes, 
         media_type, suffix = "text/csv; charset=utf-8", "csv"
     output_path = folder / f"{reference}.{suffix}"
     output_path.write_bytes(content)
+    output_reference = file_storage.reference_for(
+        output_path, file_storage.mirror(output_path, content_type=media_type)
+    )
     job = DataTransferJob(
         reference=reference, operation="export", entity_type=data.entity_type,
         source_format=data.output_format, status="completed", mapping={"fields": fields},
-        total_rows=len(rows), processed_rows=len(rows), output_path=str(output_path),
+        total_rows=len(rows), processed_rows=len(rows), output_path=output_reference,
         created_by=actor, completed_at=utcnow(),
     )
     db.add(job)

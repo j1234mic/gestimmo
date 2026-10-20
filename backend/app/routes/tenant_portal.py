@@ -1,11 +1,10 @@
 """Espace dédié au locataire : bail, loyers, quittances, incidents et messages."""
 
 import hashlib
-import os
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.core.tenant_security import (
@@ -16,6 +15,7 @@ from app.core.tenant_security import (
     verify_portal_password,
 )
 from app.database import get_db
+from app.services import file_storage
 from app.models.lease_contract import SignatureEnvelopeStatus, SignatureParty
 from app.models.tenant import (
     ApplicationStatus,
@@ -248,13 +248,22 @@ def contract_signature_document(
     if not party:
         raise HTTPException(status_code=404, detail="Demande de signature non trouvée")
     document = party.envelope.document
-    if not os.path.isfile(document.storage_path):
-        raise HTTPException(status_code=404, detail="Document non trouvé")
-    with open(document.storage_path, "rb") as source:
-        checksum = hashlib.sha256(source.read()).hexdigest()
-    if checksum != document.checksum_sha256:
+    # Le document peut être stocké dans Vercel Blob : lecture et contrôle
+    # d'empreinte passent par la façade de stockage.
+    try:
+        content = file_storage.read_bytes(document.storage_path)
+    except (FileNotFoundError, OSError, RuntimeError) as exc:
+        raise HTTPException(status_code=404, detail="Document non trouvé") from exc
+    if hashlib.sha256(content).hexdigest() != document.checksum_sha256:
         raise HTTPException(status_code=409, detail="L'intégrité du document ne peut pas être vérifiée")
-    return FileResponse(document.storage_path, media_type=document.mime_type, filename=document.original_filename)
+    try:
+        return file_storage.response(
+            document.storage_path,
+            media_type=document.mime_type,
+            filename=document.original_filename,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Document non trouvé") from exc
 
 
 @router.post("/contract-signatures/{party_id}/sign")
@@ -312,9 +321,16 @@ def lease_detail(lease_id: int, db: Session = Depends(get_db), tenant: Tenant = 
 @router.get("/leases/{lease_id}/document")
 def lease_document(lease_id: int, db: Session = Depends(get_db), tenant: Tenant = Depends(get_current_tenant)):
     lease = db.query(Lease).filter(Lease.id == lease_id, Lease.tenant_id == tenant.id).first()
-    if not lease or not lease.document_storage_path or not os.path.isfile(lease.document_storage_path):
+    if not lease or not lease.document_storage_path:
         raise HTTPException(status_code=404, detail="Document de bail non trouvé")
-    return FileResponse(lease.document_storage_path, media_type="application/pdf", filename=f"bail-{lease.reference}.pdf")
+    try:
+        return file_storage.response(
+            lease.document_storage_path,
+            media_type="application/pdf",
+            filename=f"bail-{lease.reference}.pdf",
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Document de bail non trouvé") from exc
 
 
 @router.get("/payments")
