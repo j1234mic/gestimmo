@@ -521,9 +521,11 @@ def create_document(
     allowed = cfg.allowed_extensions or list(DEFAULT_EXTENSIONS)
     if ext not in allowed:
         raise ValueError(f"Extension non autorisée : {ext}")
-    max_bytes = (cfg.max_upload_mb or 20) * 1024 * 1024
+    max_bytes = settings.upload_ceiling((cfg.max_upload_mb or 20) * 1024 * 1024)
     if len(content) > max_bytes:
-        raise ValueError(f"Fichier trop volumineux (max {cfg.max_upload_mb} Mo)")
+        raise ValueError(
+            f"Fichier trop volumineux (max {file_storage.format_size(max_bytes)})"
+        )
     content, new_ext = _compress_if_needed(content, filename, bool(cfg.compress_images))
     if new_ext != ext and filename.lower().endswith(ext):
         filename = str(Path(filename).with_suffix(f".{new_ext}"))
@@ -595,9 +597,11 @@ def add_version(
     allowed = cfg.allowed_extensions or list(DEFAULT_EXTENSIONS)
     if ext not in allowed:
         raise ValueError(f"Extension non autorisée : {ext}")
-    max_bytes = (cfg.max_upload_mb or 20) * 1024 * 1024
+    max_bytes = settings.upload_ceiling((cfg.max_upload_mb or 20) * 1024 * 1024)
     if len(content) > max_bytes:
-        raise ValueError(f"Fichier trop volumineux (max {cfg.max_upload_mb} Mo)")
+        raise ValueError(
+            f"Fichier trop volumineux (max {file_storage.format_size(max_bytes)})"
+        )
     content, _ = _compress_if_needed(content, filename, bool(cfg.compress_images))
     path = store_file(content, filename, document.id)
     reference = persist_reference(path, mime_type)

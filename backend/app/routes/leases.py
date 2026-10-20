@@ -640,8 +640,12 @@ async def upload_document(
     if extension not in {"pdf", "jpg", "jpeg", "png"}:
         raise HTTPException(status_code=400, detail="Formats autorisés : PDF, JPG, JPEG, PNG")
     content = await file.read()
-    if not content or len(content) > 25 * 1024 * 1024:
-        raise HTTPException(status_code=400, detail="Fichier vide ou supérieur à 25 Mo")
+    max_size = settings.upload_ceiling(25 * 1024 * 1024)
+    if not content or len(content) > max_size:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Fichier vide ou supérieur à {file_storage.format_size(max_size)}",
+        )
     if extension == "pdf" and not content.startswith(b"%PDF"):
         raise HTTPException(status_code=400, detail="PDF invalide")
     if extension in {"jpg", "jpeg", "png"}:

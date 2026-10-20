@@ -338,6 +338,21 @@ class Settings:
             return min(self.MAX_UPLOAD_SIZE, self.VERCEL_BODY_LIMIT)
         return self.MAX_UPLOAD_SIZE
 
+    def upload_ceiling(self, requested: int) -> int:
+        """Ramène un plafond d'upload métier à la limite imposée par la plateforme.
+
+        Chaque garde conserve son plafond métier — 15 Mo pour une pièce de
+        candidature, 50 Mo pour une vidéo d'intervention — mais sur Vercel ce
+        plafond est inatteignable : la plateforme répond 413 avant FastAPI.
+        L'annoncer tel quel ferait promettre un dépôt accepté qui échoue en
+        réalité côté plateforme, avec un corps d'erreur que l'application n'a pas
+        écrit. Hors Vercel la valeur est rendue inchangée, ce qui laisse le
+        comportement des autres hébergements strictement identique.
+        """
+        if is_vercel_environment():
+            return min(requested, self.VERCEL_BODY_LIMIT)
+        return requested
+
 
 def configure_logging(settings_obj: "Settings | None" = None) -> None:
     """Configure la journalisation stdout + fichier à partir de LOG_LEVEL / LOG_FILE."""

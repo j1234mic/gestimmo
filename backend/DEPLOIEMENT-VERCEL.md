@@ -231,12 +231,24 @@ quatrième contrainte, elle, découle du stockage facturé :
 **1. Les fichiers de plus de 4,5 Mo ne peuvent pas traverser l'API.**
 Vercel répond `413 FUNCTION_PAYLOAD_TOO_LARGE` avant même d'atteindre FastAPI.
 Sont concernés : les vidéos de galerie (`mp4`, `mov`, `webm`, `m4v`) et toute
-pièce jointe volumineuse. `settings.effective_upload_limit` ramène la limite
-annoncée à 4,5 Mo sur Vercel. La seule issue est un **téléversement direct du
-navigateur vers le store Blob** (« client uploads », SDK `@vercel/blob/client`) :
-le fichier ne passe plus par la Function. Cela suppose un frontend — le dépôt
-n'en contient aucun — et une route de génération de jeton, qui doit être écrite
-en JavaScript.
+pièce jointe volumineuse.
+
+Le dépôt compte 14 gardes de taille, aux plafonds métier très divers : 2 Mo pour
+une signature, 15 Mo pour une pièce de candidature ou une photo d'état des lieux,
+20 Mo pour un bail ou un relevé bancaire, 25 Mo pour un document de bail, 40 et
+50 Mo pour les interventions de maintenance. Sur Vercel, tout plafond supérieur à
+4,5 Mo est **inatteignable** : la plateforme refuse la requête en amont, avec un
+corps d'erreur qu'elle a écrit, pas l'application. Les 14 gardes passent donc par
+`settings.upload_ceiling(plafond)`, qui borne la valeur à 4,5 Mo sur Vercel et la
+rend inchangée ailleurs — Render, Railway et le VPS conservent un comportement
+strictement identique. Les messages d'erreur annoncent le plafond réellement
+appliqué (`file_storage.format_size`), pour ne plus promettre « 15 Mo maximum »
+là où la garde refuse à 4,3 Mo.
+
+La seule issue pour les gros fichiers est un **téléversement direct du navigateur
+vers le store Blob** (« client uploads », SDK `@vercel/blob/client`) : le fichier
+ne passe plus par la Function. Cela suppose un frontend — le dépôt n'en contient
+aucun — et une route de génération de jeton, qui doit être écrite en JavaScript.
 
 **2. Les réponses sont limitées à 4,5 Mo, sauf en streaming.**
 Les exports PDF/Excel du dépôt utilisent `StreamingResponse` et ne sont donc pas
@@ -282,9 +294,9 @@ branchez Upstash Redis ou le WAF Vercel.
 
 | Fichier | Adaptation |
 |---|---|
-| `app/config.py` | `STORAGE_BACKEND`, `BLOB_*`, `CRON_SECRET`, `TRUST_PROXY_HEADERS`, `BACKUP_SCHEDULER_ENABLED`, détection `is_vercel_environment()`, `effective_upload_limit` |
+| `app/config.py` | `STORAGE_BACKEND`, `BLOB_*`, `CRON_SECRET`, `TRUST_PROXY_HEADERS`, `BACKUP_SCHEDULER_ENABLED`, détection `is_vercel_environment()`, `effective_upload_limit`, `upload_ceiling()` |
 | `app/services/blob_storage.py` | Client REST Vercel Blob (httpx, sans dépendance nouvelle), contrat reproduit du SDK officiel `@vercel/blob` 2.8.2 |
-| `app/services/file_storage.py` | Façade local/Blob : `mirror`, `reference_for`, `response`, `read_bytes`, `exists`, `delete`, `materialize` |
+| `app/services/file_storage.py` | Façade local/Blob : `mirror`, `reference_for`, `response`, `read_bytes`, `exists`, `delete`, `materialize`, `format_size` |
 | `app/middleware/rate_limit.py` | `client_ip()` lit `X-Forwarded-For` quand le proxy est de confiance |
 | `app/routes/cron.py` | `GET /api/cron/daily` et `/api/cron/status`, authentifiés par `CRON_SECRET` |
 | `app/main.py` | Création des racines tolérante aux échecs, montage `/uploads` conditionnel, `/health` enrichi, planificateur interne gardé |

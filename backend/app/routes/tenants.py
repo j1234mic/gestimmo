@@ -476,8 +476,12 @@ async def upload_guarantor_document(
     if extension not in {"pdf", "jpg", "jpeg", "png"}:
         raise HTTPException(status_code=400, detail="Format non autorisé")
     content = await file.read()
-    if not content or len(content) > 15 * 1024 * 1024:
-        raise HTTPException(status_code=400, detail="Fichier vide ou supérieur à 15 Mo")
+    max_size = settings.upload_ceiling(15 * 1024 * 1024)
+    if not content or len(content) > max_size:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Fichier vide ou supérieur à {file_storage.format_size(max_size)}",
+        )
     directory = Path(settings.private_upload_dir_path) / "tenants" / str(tenant.id) / "guarantors"
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / f"{uuid.uuid4().hex}.{extension}"
@@ -574,8 +578,12 @@ async def upload_lease_document(tenant_id: int, lease_id: int, file: UploadFile 
     content = await file.read()
     if not file.filename.lower().endswith(".pdf") or not content.startswith(b"%PDF"):
         raise HTTPException(status_code=400, detail="Le bail doit être un fichier PDF valide")
-    if len(content) > 20 * 1024 * 1024:
-        raise HTTPException(status_code=413, detail="Fichier supérieur à 20 Mo")
+    max_size = settings.upload_ceiling(20 * 1024 * 1024)
+    if len(content) > max_size:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Fichier supérieur à {file_storage.format_size(max_size)}",
+        )
     directory = Path(settings.private_upload_dir_path) / "tenants" / str(tenant_id) / "leases"
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / f"{uuid.uuid4().hex}.pdf"

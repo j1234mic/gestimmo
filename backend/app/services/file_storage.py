@@ -120,6 +120,21 @@ def guess_content_type(path: Path | str, fallback: str | None = None) -> str:
     return guessed or fallback or "application/octet-stream"
 
 
+def format_size(nbytes: int) -> str:
+    """Formate un plafond en mégaoctets pour un message d'erreur lisible.
+
+    Un multiple exact du mégaoctet rend « 15 Mo » ; la limite Vercel de
+    4 500 000 octets n'en est pas un et rend « 4,3 Mo ». Annoncer le plafond
+    réellement appliqué évite qu'une garde refusant un fichier à 4,3 Mo
+    explique qu'elle accepte 15 Mo.
+    """
+    if nbytes <= 0:
+        return "0 Mo"
+    if nbytes % (1024 * 1024) == 0:
+        return f"{nbytes // (1024 * 1024)} Mo"
+    return f"{nbytes / (1024 * 1024):.1f} Mo".replace(".", ",")
+
+
 # ---------------------------------------------------------------------------
 # Écritures
 # ---------------------------------------------------------------------------

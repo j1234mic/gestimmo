@@ -192,8 +192,12 @@ async def _save_document(
     content = await file.read()
     if not content:
         raise HTTPException(status_code=400, detail="Le fichier est vide")
-    if len(content) > MAX_DOCUMENT_SIZE:
-        raise HTTPException(status_code=413, detail="Fichier trop volumineux (15 Mo maximum)")
+    max_size = settings.upload_ceiling(MAX_DOCUMENT_SIZE)
+    if len(content) > max_size:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Fichier trop volumineux ({file_storage.format_size(max_size)} maximum)",
+        )
     _validate_file_content(content, extension)
 
     directory = Path(settings.private_upload_dir_path) / "applications" / str(application.id)

@@ -398,8 +398,12 @@ async def upload_photo(
     if extension not in {"jpg", "jpeg", "png", "webp"}:
         raise HTTPException(status_code=400, detail="Formats photo autorisés : JPG, PNG, WEBP")
     content = await file.read()
-    if not content or len(content) > 15 * 1024 * 1024:
-        raise HTTPException(status_code=400, detail="Photo vide ou supérieure à 15 Mo")
+    max_size = settings.upload_ceiling(15 * 1024 * 1024)
+    if not content or len(content) > max_size:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Photo vide ou supérieure à {file_storage.format_size(max_size)}",
+        )
     try:
         import io
         from PIL import Image

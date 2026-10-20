@@ -89,10 +89,11 @@ async def upload_document(
     # Lire le contenu
     content = await file.read()
 
-    if len(content) > settings.MAX_UPLOAD_SIZE:
+    max_size = settings.effective_upload_limit
+    if len(content) > max_size:
         raise HTTPException(
             status_code=400,
-            detail=f"Fichier trop volumineux (max {settings.MAX_UPLOAD_SIZE} octets)",
+            detail=f"Fichier trop volumineux (max {max_size} octets)",
         )
 
     # ✅ Chemin de sauvegarde : uploads/{property_id}/documents/

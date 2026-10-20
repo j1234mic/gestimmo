@@ -584,8 +584,11 @@ def analyse_import(db: Session, filename: str, content: bytes, entity_type: str,
     suffix = Path(filename).suffix.lower().lstrip(".")
     if suffix not in {"csv", "xlsx"}:
         raise ValueError("Seuls les fichiers CSV et XLSX sont acceptés")
-    if len(content) > 20 * 1024 * 1024:
-        raise ValueError("Fichier trop volumineux (20 Mo maximum)")
+    max_bytes = settings.upload_ceiling(20 * 1024 * 1024)
+    if len(content) > max_bytes:
+        raise ValueError(
+            f"Fichier trop volumineux ({file_storage.format_size(max_bytes)} maximum)"
+        )
     folder = settings.private_upload_dir_path / "integrations"
     folder.mkdir(parents=True, exist_ok=True)
     ref = f"IMP-{uuid.uuid4().hex[:12].upper()}"

@@ -388,10 +388,11 @@ async def upload_property_photos(
 
         # Lire et compresser l'image (les vidéos sont stockées en l'état)
         content = await file.read()
-        if len(content) > settings.MAX_UPLOAD_SIZE:
+        max_size = settings.effective_upload_limit
+        if len(content) > max_size:
             raise HTTPException(
                 status_code=400,
-                detail=f"Fichier trop volumineux (max {settings.MAX_UPLOAD_SIZE} octets)",
+                detail=f"Fichier trop volumineux (max {max_size} octets)",
             )
 
         if media_type == "image":

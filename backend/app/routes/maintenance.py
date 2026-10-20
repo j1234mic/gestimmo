@@ -340,8 +340,12 @@ async def upload_ticket_attachment(
     if extension not in {"jpg", "jpeg", "png", "webp", "mp4", "mov", "pdf"}:
         raise HTTPException(status_code=400, detail="Format de fichier non autorisé")
     content = await file.read()
-    if not content or len(content) > 50 * 1024 * 1024:
-        raise HTTPException(status_code=400, detail="Fichier vide ou supérieur à 50 Mo")
+    max_size = settings.upload_ceiling(50 * 1024 * 1024)
+    if not content or len(content) > max_size:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Fichier vide ou supérieur à {file_storage.format_size(max_size)}",
+        )
     directory = Path(settings.private_upload_dir_path) / "maintenance" / str(ticket_id)
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / f"{uuid.uuid4().hex}.{extension}"
@@ -523,7 +527,8 @@ async def upload_work_document(
     if extension not in {"pdf", "jpg", "jpeg", "png", "doc", "docx", "xls", "xlsx"}:
         raise HTTPException(status_code=400, detail="Format non autorisé")
     content = await file.read()
-    if not content or len(content) > 40 * 1024 * 1024:
+    max_size = settings.upload_ceiling(40 * 1024 * 1024)
+    if not content or len(content) > max_size:
         raise HTTPException(status_code=400, detail="Fichier vide ou trop volumineux")
     directory = Path(settings.private_upload_dir_path) / "works" / str(project_id)
     directory.mkdir(parents=True, exist_ok=True)

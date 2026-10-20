@@ -470,6 +470,32 @@ class VercelEnvironmentTest(unittest.TestCase):
         with patch.object(settings, "MAX_UPLOAD_SIZE", 5_242_880):
             self.assertEqual(settings.effective_upload_limit, 5_242_880)
 
+    def test_plafond_metier_ramene_a_la_limite_vercel(self):
+        """Les gardes conservent leur plafond métier, borné par la plateforme."""
+        with patch.dict(os.environ, {"VERCEL": "1"}, clear=False):
+            # 15 Mo pour une pièce de candidature : inatteignable sur Vercel.
+            self.assertEqual(settings.upload_ceiling(15 * 1024 * 1024), 4_500_000)
+            # Un plafond déjà inférieur à la limite reste inchangé.
+            self.assertEqual(settings.upload_ceiling(2 * 1024 * 1024), 2 * 1024 * 1024)
+        for marker in ("VERCEL", "VERCEL_ENV", "VERCEL_DEPLOYMENT_ID", "VERCEL_URL"):
+            os.environ.pop(marker, None)
+        # Hors Vercel le plafond métier s'applique tel quel : aucun changement de
+        # comportement pour Render, Railway ou le VPS.
+        self.assertEqual(settings.upload_ceiling(15 * 1024 * 1024), 15 * 1024 * 1024)
+        self.assertEqual(settings.upload_ceiling(50 * 1024 * 1024), 50 * 1024 * 1024)
+
+    def test_format_size_annonce_le_plafond_reel(self):
+        """Un message ne doit pas promettre 15 Mo quand la garde refuse à 4,3 Mo."""
+        self.assertEqual(file_storage.format_size(15 * 1024 * 1024), "15 Mo")
+        self.assertEqual(file_storage.format_size(2 * 1024 * 1024), "2 Mo")
+        self.assertEqual(file_storage.format_size(4_500_000), "4,3 Mo")
+        self.assertEqual(file_storage.format_size(0), "0 Mo")
+        with patch.dict(os.environ, {"VERCEL": "1"}, clear=False):
+            ceiling = settings.upload_ceiling(15 * 1024 * 1024)
+            self.assertEqual(file_storage.format_size(ceiling), "4,3 Mo")
+        for marker in ("VERCEL", "VERCEL_ENV", "VERCEL_DEPLOYMENT_ID", "VERCEL_URL"):
+            os.environ.pop(marker, None)
+
     def test_blob_inactif_sans_jeton_meme_si_demande(self):
         with patch.object(settings, "STORAGE_BACKEND", "blob"):
             with patch.object(settings, "BLOB_READ_WRITE_TOKEN", ""):

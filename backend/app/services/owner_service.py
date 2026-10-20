@@ -216,8 +216,12 @@ def _save_signature_image(encoded: str, directory: Path) -> str:
         content = base64.b64decode(value, validate=True)
     except (binascii.Error, ValueError):
         raise ValueError("Signature encodée invalide")
-    if not content or len(content) > 2 * 1024 * 1024:
-        raise ValueError("La signature doit être une image PNG/JPEG de moins de 2 Mo")
+    max_size = settings.upload_ceiling(2 * 1024 * 1024)
+    if not content or len(content) > max_size:
+        raise ValueError(
+            "La signature doit être une image PNG/JPEG de moins de "
+            f"{file_storage.format_size(max_size)}"
+        )
     expected = (b"\x89PNG\r\n\x1a\n", b"\xff\xd8\xff")
     if not any(content.startswith(sig) for sig in expected):
         raise ValueError("La signature doit être une image PNG ou JPEG")
