@@ -44,7 +44,7 @@ from app.routes import owner_portal, communication
 # Architecture hexagonale : routeurs v2 (Properties / Owners).
 from app.hexagon.web.property_router import router as properties_v2_router
 from app.hexagon.web.owner_router import router as owners_v2_router
-from app.config import configure_logging, settings
+from app.config import configure_logging, is_railway_environment, settings
 from app.database import init_db, SessionLocal
 
 # Import des middlewares personnalisés depuis core/security.py
@@ -246,7 +246,15 @@ async def startup():
             except ValueError:
                 pass
             is_mysql = settings.DATABASE_URL.startswith(("mysql", "mariadb"))
-            if is_mysql:
+            if is_railway_environment():
+                service_hint = (
+                    "   Vérifiez que le service de base de données est démarré et accessible dans le projet Railway.\n"
+                    "   Dans les variables du service API, définissez DATABASE_URL comme référence à la base,\n"
+                    "   par exemple ${{Postgres.DATABASE_URL}} (remplacez Postgres par le nom exact du service).\n"
+                    "   N'utilisez ni « localhost » ni l'alias Docker Compose « postgres » : ce n'est pas\n"
+                    "   l'adresse du service Railway. Pour une base externe, vérifiez l'URL, le port et TLS."
+                )
+            elif is_mysql:
                 service_hint = (
                     "   1) Le conteneur mysql est-il démarré ?\n"
                     "      -> docker compose -f docker-compose.mysql.yml up -d mysql\n"

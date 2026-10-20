@@ -14,6 +14,15 @@ load_dotenv(_ENV_FILE)
 # Ils ne sont résolubles qu'à l'intérieur des conteneurs, jamais sur la machine hôte.
 COMPOSE_ONLY_HOSTS = {"postgres", "db", "mysql", "mariadb"}
 
+# Railway n'expose pas toujours /.dockerenv dans ses conteneurs. Ces variables
+# sont injectées à l'exécution et indiquent que l'application est sur Railway.
+RAILWAY_RUNTIME_MARKERS = (
+    "RAILWAY_SERVICE_ID",
+    "RAILWAY_DEPLOYMENT_ID",
+    "RAILWAY_ENVIRONMENT_ID",
+    "RAILWAY_ENVIRONMENT_NAME",
+)
+
 # SQLAlchemy ne fournit aucun connecteur MySQL : le schéma d'URL écrit par les
 # hébergeurs (`mysql://…`, `mariadb://…`, `mysql+mysqldb://…`) est réécrit vers
 # PyMySQL, le pilote pur Python déclaré dans requirements.txt. Sans cela,
@@ -29,9 +38,22 @@ def normalize_mysql_scheme(scheme: str) -> str:
     return scheme
 
 
+def is_railway_environment() -> bool:
+    """Vrai quand Railway a injecté ses marqueurs d'environnement d'exécution."""
+    return any(os.getenv(marker) for marker in RAILWAY_RUNTIME_MARKERS)
+
+
 def running_inside_docker() -> bool:
-    """Vrai quand le processus s'exécute dans un conteneur Docker/K8s."""
-    return Path("/.dockerenv").exists() or bool(os.getenv("KUBERNETES_SERVICE_HOST"))
+    """Vrai dans Docker/Kubernetes ou sur Railway, même sans ``/.dockerenv``.
+
+    Cette détection évite de transformer un nom de service en ``localhost``
+    sur les plateformes conteneurisées qui ne créent pas le fichier marker.
+    """
+    return (
+        Path("/.dockerenv").exists()
+        or bool(os.getenv("KUBERNETES_SERVICE_HOST"))
+        or is_railway_environment()
+    )
 
 
 def normalize_database_url(url: str, *, in_docker: bool | None = None) -> str:
@@ -39,11 +61,12 @@ def normalize_database_url(url: str, *, in_docker: bool | None = None) -> str:
 
     Deux corrections sont appliquées :
 
-    1. **Hôte compose-only** — ``postgres``/``mysql`` ne sont résolubles que
-       dans le réseau Docker. Lancer ``uvicorn`` sur la machine hôte avec une
-       telle URL échoue (« could not translate host name … »). Hors Docker,
-       l'hôte est remappé vers ``localhost``, le port publié par le compose
-       restant inchangé.
+    1. **Hôte compose-only** — ``postgres``/``mysql`` sont des alias du réseau
+       docker-compose. Lancer ``uvicorn`` sur la machine hôte avec une telle URL
+       échoue (« could not translate host name … ») ; hors conteneur, l'hôte est
+       remappé vers ``localhost`` et le port publié par compose est conservé.
+       Les marqueurs Railway/Kubernetes empêchent ce remappage dans les services
+       déployés, même si la plateforme ne fournit pas ``/.dockerenv``.
     2. **Pilote MySQL** — ``mysql://`` et ``mariadb://`` sont réécrits vers
        ``mysql+pymysql://`` : PyMySQL est le pilote pur Python embarqué dans
        l'image, MySQLdb n'y est pas installé.

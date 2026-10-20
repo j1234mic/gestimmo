@@ -3,6 +3,7 @@
 import os
 import tempfile
 import unittest
+from unittest.mock import patch
 
 TEST_DIR = tempfile.mkdtemp(prefix="gestimmo-config-")
 os.environ.setdefault("DATABASE_URL", f"sqlite:///{TEST_DIR}/tests.db")
@@ -70,6 +71,13 @@ class DatabaseUrlNormalizationTest(unittest.TestCase):
             normalize_database_url(self.COMPOSE_URL, in_docker=True),
             self.COMPOSE_URL,
         )
+
+    def test_compose_host_preserved_on_railway_without_dockerenv(self):
+        # Certains runtimes Railway n'exposent pas /.dockerenv, bien qu'ils
+        # disposent de leur propre réseau entre services.
+        with patch.dict(os.environ, {"RAILWAY_SERVICE_ID": "api-service"}, clear=True):
+            with patch("app.config.Path.exists", return_value=False):
+                self.assertEqual(normalize_database_url(self.COMPOSE_URL), self.COMPOSE_URL)
 
     def test_other_hosts_untouched(self):
         for url in (
