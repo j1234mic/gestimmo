@@ -280,6 +280,9 @@ L'API est alors disponible sur `https://api.example.com/docs`.
 C'est la combinaison la plus rapide : **aucune carte bancaire**, un dépôt
 GitHub, et deux services à créer.
 
+> 📖 Procédure détaillée, commande par commande :
+> [`DEPLOIEMENT-RENDER-AIVEN.md`](DEPLOIEMENT-RENDER-AIVEN.md).
+
 ### B.1 Créer la base Aiven MySQL
 
 1. Créez un compte sur [aiven.io](https://aiven.io/free-mysql-database) — sans

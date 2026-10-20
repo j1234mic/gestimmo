@@ -386,9 +386,13 @@ cd backend
 docker compose -f docker-compose.mysql.yml up -d --build
 ```
 
-Le comparatif des hébergements gratuits (Oracle Cloud Always Free, Render,
-Cloud Run) et des bases MySQL gratuites (HeatWave, Aiven, TiDB) est détaillé
-dans [`backend/DEPLOIEMENT-GRATUIT.md`](backend/DEPLOIEMENT-GRATUIT.md).
+Deux guides :
+
+- **déploiement pas à pas sur Render + Aiven MySQL** (gratuit, sans carte) :
+  [`backend/DEPLOIEMENT-RENDER-AIVEN.md`](backend/DEPLOIEMENT-RENDER-AIVEN.md) ;
+- comparatif des hébergements gratuits (Oracle Cloud Always Free, Render,
+  Cloud Run) et des bases MySQL gratuites (HeatWave, Aiven, TiDB) :
+  [`backend/DEPLOIEMENT-GRATUIT.md`](backend/DEPLOIEMENT-GRATUIT.md).
 Un blueprint Render prêt à l'emploi se trouve dans
 [`render.yaml`](render.yaml).
 
